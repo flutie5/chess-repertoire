@@ -1,0 +1,38 @@
+# Local secrets and runtime data
+webapp/.secret_key
+webapp/users.db
+.chesscom-cache/
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Node (Playwright etc.)
+node_modules/
+package-lock.json
+package.json
+
+# Engine binaries (download via scripts/download_stockfish.sh on deploy)
+engine/
+
+# Local verification / Playwright artifacts
+screenshots/
+verify-screens/
+verify-shots/
+verify_*.py
+/*.png
+shot_*.png
+tc_*.png
+best-move*.png
+flute5-repertoire.md
+*-repertoire.md

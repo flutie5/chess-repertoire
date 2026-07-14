@@ -1,0 +1,20 @@
+# Netlify — static frontend + API proxy (same-origin cookies for auth)
+#
+# Replace BACKEND_URL below with your Render service URL after creating the web service.
+# Example: https://chess-repertoire-api.onrender.com
+
+[build]
+  publish = "webapp/static"
+
+# Proxy API calls to Render so the browser sees a single origin (Netlify domain).
+[[redirects]]
+  from = "/api/*"
+  to = "https://chess-repertoire-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback — Netlify serves existing files (/, /vendor/*, /pieces/*) first.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

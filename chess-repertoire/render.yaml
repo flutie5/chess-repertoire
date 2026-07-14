@@ -1,0 +1,23 @@
+# Render Blueprint — Chess Repertoire API backend
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: chess-repertoire-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && bash scripts/download_stockfish.sh
+    startCommand: gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: chess-repertoire-data
+      mountPath: /data
+      sizeGB: 1

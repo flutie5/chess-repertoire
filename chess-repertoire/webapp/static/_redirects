@@ -1,0 +1,3 @@
+# Backup redirects (netlify.toml takes precedence when both exist).
+# Replace the host below with your Render service URL.
+/api/*  https://chess-repertoire-api.onrender.com/api/:splat  200

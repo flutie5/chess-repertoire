@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess Repertoire Explorer</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    /* Surfaces */
+    --bg-page: #312e2b;
+    --bg-card: #262421;
+    --bg-card-hover: #2b2926;
+    --bg-input: #1f1d1b;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+
+    /* Brand green */
+    --green: #81b64c;
+    --green-hover: #8fc25b;
+    --green-shadow: #45753c;
+
+    /* Board-derived accents */
+    --board-light: #ebecd0;
+    --board-dark: #779556;
+
+    /* Semantic */
+    --loss-red: #fa412d;
+    --draw-gray: #8b8987;
+    --warn-orange: #e58f2a;
+
+    /* Text */
+    --text-primary: rgba(255, 255, 255, 0.92);
+    --text-secondary: rgba(255, 255, 255, 0.72);
+    --text-muted: rgba(255, 255, 255, 0.5);
+
+    /* Shape */
+    --radius: 10px;
+    --radius-sm: 6px;
+
+    --hl: rgba(255, 255, 51, 0.5);   /* last-move highlight, chess.com yellow */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg-page); color: var(--text-primary);
+    font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 22px; background: var(--bg-card);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  header h1 { font-size: 18px; margin: 0 12px 0 0; font-weight: 700; }
+  header h1 span { color: var(--green); }
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  input[type=text] {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 10px; font-size: 14px; width: 180px; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--green); }
+  .tc-group { display: flex; gap: 6px; width: 100%; }
+  .tc-group label {
+    flex: 1; text-align: center; padding: 8px; cursor: pointer;
+    font-size: 14px; font-weight: 700; user-select: none;
+    background: var(--bg-card); color: var(--text-muted);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  }
+  .tc-group label:hover { background: var(--bg-card-hover); }
+  .tc-group input { display: none; }
+  .tc-group label:has(input:checked) {
+    background: var(--green); color: #fff; border-color: var(--green);
+  }
+  .tc-group label:has(input:checked):hover { background: var(--green-hover); }
+  button.primary {
+    background: var(--green); color: #fff; border: 0; border-radius: var(--radius-sm);
+    padding: 8px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 4px 0 var(--green-shadow);
+  }
+  button.primary:hover { background: var(--green-hover); }
+  button.primary:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--green-shadow); }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--text-muted); font-size: 13px; }
+  #status.error { color: var(--loss-red); }
+
+  main {
+    display: grid; grid-template-columns: minmax(440px, 1fr) 420px;
+    gap: 20px; padding: 20px 22px; max-width: 1320px; margin: 0 auto;
+  }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+
+  /* ---- board ---- */
+  .board-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #line-title { font-weight: 700; text-align: center; min-height: 22px; }
+  .board-row { display: flex; gap: 10px; align-items: stretch; width: min(100%, 600px); }
+  #evalbar {
+    width: 20px; border-radius: var(--radius-sm); overflow: hidden;
+    background: #403d39; position: relative; flex: none;
+    border: 1px solid var(--border-subtle);
+  }
+  #evalbar .white-fill {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #f0f0f0; height: 50%;
+    transition: height .4s ease;
+  }
+  #evalbar .tick {
+    position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: rgba(128,128,128,.6); z-index: 1;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    flex: 1; aspect-ratio: 1; min-width: 0;
+    border-radius: var(--radius-sm); overflow: hidden;
+    user-select: none; touch-action: none; position: relative;
+  }
+  .sq { aspect-ratio: 1; overflow: hidden; }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; }
+  .sq.light { background: var(--board-light); }
+  .sq.dark { background: var(--board-dark); }
+  .sq.hl::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
+  .sq.sel::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
+  .sq.dest::before {
+    content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.22); z-index: 2; pointer-events: none;
+  }
+  .sq.dest.capture::before {
+    width: 100%; height: 100%; background: transparent;
+    border: 6px solid rgba(0, 0, 0, 0.22); border-radius: 50%;
+  }
+  .sq.movable { cursor: grab; }
+  .sq.dest { cursor: pointer; }
+  .sq img.piece {
+    width: 92%; height: 92%; z-index: 1; pointer-events: none;
+    image-rendering: -webkit-optimize-contrast;
+  }
+  .sq img.piece.dragging { opacity: 0.35; }
+  #drag-ghost {
+    position: fixed; z-index: 100; pointer-events: none;
+    will-change: left, top;
+  }
+  #promo-picker {
+    position: absolute; z-index: 50; display: flex; flex-direction: column;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  }
+  #promo-picker button {
+    background: none; border: 0; padding: 4px; cursor: pointer; line-height: 0;
+  }
+  #promo-picker button:hover { background: var(--bg-card-hover); }
+  #promo-picker img { width: 52px; height: 52px; }
+  .sq .coord { position: absolute; font-size: 11px; font-weight: 700; z-index: 1; }
+  .sq.light .coord { color: var(--board-dark); }
+  .sq.dark .coord { color: var(--board-light); }
+  .coord.file { right: 4px; bottom: 2px; }
+  .coord.rank { left: 4px; top: 2px; }
+
+  .nav { display: flex; gap: 8px; align-items: center; }
+  .nav button {
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); padding: 6px 16px; font-size: 15px; cursor: pointer;
+  }
+  .nav button:hover { background: var(--bg-card-hover); border-color: var(--green); }
+  .nav button.active { background: var(--green); color: #fff; border-color: var(--green); }
+  .nav button.active:hover { background: var(--green-hover); }
+  #best-arrow {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 3;
+  }
+
+  #engine-panel {
+    width: min(100%, 600px); background: var(--bg-card);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius);
+    padding: 10px 14px; display: none; gap: 4px; flex-direction: column;
+  }
+  #engine-panel.visible { display: flex; }
+  #engine-head { display: flex; align-items: baseline; gap: 10px; }
+  #engine-score { font-size: 18px; font-weight: 700; }
+  #engine-score.white-adv { color: var(--text-primary); }
+  #engine-score.black-adv { color: var(--text-secondary); }
+  #engine-label { color: var(--text-muted); font-size: 12px; }
+  #engine-pv { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+  #engine-pv b { color: var(--green); }
+
+  #line-moves {
+    width: min(100%, 600px); min-height: 48px;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 4px 2px;
+  }
+  #line-moves .mvnum { color: var(--text-muted); margin-left: 6px; }
+  #line-moves .mv { padding: 1px 6px; border-radius: 4px; cursor: pointer; }
+  #line-moves .mv:hover { background: var(--bg-card-hover); }
+  #line-moves .mv.cur { background: var(--green); color: #fff; }
+  #line-moves .placeholder { color: var(--text-muted); }
+
+  /* ---- sidebar ---- */
+  .sidebar { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  /* time-frame dropdown */
+  .range-wrap { position: relative; }
+  #range-btn {
+    width: 100%; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 12px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  #range-btn:hover { background: var(--bg-card-hover); }
+  #range-btn .cal { color: var(--text-muted); flex: none; line-height: 0; }
+  #range-btn .range-label {
+    flex: 1; text-align: left; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #range-btn .range-chev { color: var(--text-muted); font-size: 10px; flex: none; transition: transform .15s; }
+  .range-wrap.open #range-btn .range-chev { transform: rotate(180deg); }
+  #range-panel {
+    position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 70;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+    padding: 6px; display: none; flex-direction: column; gap: 2px;
+  }
+  .range-wrap.open #range-panel { display: flex; }
+  #range-panel .preset {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: 0; border-radius: var(--radius-sm);
+    color: var(--text-secondary); padding: 7px 10px; font-size: 13px;
+    cursor: pointer; text-align: left; font-family: inherit;
+  }
+  #range-panel .preset:hover { background: var(--bg-card-hover); }
+  #range-panel .preset .tick { width: 14px; flex: none; color: var(--green); font-weight: 700; visibility: hidden; }
+  #range-panel .preset.selected { color: var(--text-primary); font-weight: 700; }
+  #range-panel .preset.selected .tick { visibility: visible; }
+  .range-custom {
+    border-top: 1px solid var(--border-subtle); margin-top: 4px;
+    padding: 8px 10px 6px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .range-custom .rc-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-muted);
+  }
+  .range-custom .rc-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+  .range-custom .rc-row span { width: 34px; flex: none; }
+  .range-custom input[type=date] {
+    flex: 1; min-width: 0; background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 5px 6px; font-size: 12px; outline: none; color-scheme: dark;
+    font-family: inherit;
+  }
+  .range-custom input[type=date]:focus { border-color: var(--green); }
+  #range-apply {
+    margin-top: 2px; background: var(--green); color: #fff; border: 0;
+    border-radius: var(--radius-sm); padding: 7px 12px; font-size: 13px;
+    font-weight: 700; cursor: pointer; box-shadow: 0 3px 0 var(--green-shadow);
+    font-family: inherit;
+  }
+  #range-apply:hover { background: var(--green-hover); }
+  #range-apply:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--green-shadow); }
+  #range-msg { font-size: 12px; color: var(--loss-red); min-height: 0; }
+
+  .color-tabs { display: flex; gap: 6px; }
+  .color-tabs button {
+    flex: 1; background: var(--bg-card); color: var(--text-muted);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  .color-tabs button.active { background: var(--green); color: #fff; border-color: var(--green); }
+  #summary { color: var(--text-muted); font-size: 13px; }
+  #openings {
+    display: flex; flex-direction: column; gap: 8px;
+    max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 4px;
+  }
+  #openings::-webkit-scrollbar { width: 8px; }
+  #openings::-webkit-scrollbar-thumb { background: var(--bg-card-hover); border-radius: 4px; }
+  .opening {
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); overflow: hidden;
+    flex: none;   /* prevent flex parent from squashing rows when list overflows */
+  }
+  .opening-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; cursor: pointer;
+  }
+  .opening-head:hover { background: var(--bg-card-hover); }
+  .opening-head .name { flex: 1; font-weight: 600; font-size: 14px; min-width: 0; }
+  .opening-head .meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .scorebar {
+    width: 64px; height: 8px; border-radius: 4px; background: var(--loss-red);
+    overflow: hidden; flex: none;
+  }
+  .scorebar i { display: block; height: 100%; background: var(--green); }
+  .chev { color: var(--text-muted); flex: none; transition: transform .15s; }
+  .opening.open .chev { transform: rotate(90deg); }
+  .lines { display: none; border-top: 1px solid var(--border-subtle); }
+  .opening.open .lines { display: block; }
+  .line {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 12px 8px 22px; cursor: pointer; font-size: 13px;
+  }
+  .line:hover { background: var(--bg-card-hover); }
+  .line.active { background: rgba(129,182,76,.14); box-shadow: inset 3px 0 0 var(--green); }
+  .line .lname { flex: 1; min-width: 0; color: var(--text-secondary); }
+  .line.active .lname { color: var(--text-primary); }
+  .line .lgames { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .games-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px 4px 22px; font-size: 12px; font-weight: 700;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .games-head .gfilter {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 600; text-transform: none; color: var(--text-secondary);
+  }
+  .games-head .gclear {
+    flex: none; cursor: pointer; color: var(--green);
+    text-transform: none; font-weight: 600;
+  }
+  .games-head .gclear:hover { text-decoration: underline; }
+  .game-rows { max-height: 240px; overflow-y: auto; }
+  .game-rows::-webkit-scrollbar { width: 8px; }
+  .game-rows::-webkit-scrollbar-thumb { background: var(--bg-card-hover); border-radius: 4px; }
+  .game-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px 6px 22px; font-size: 13px;
+    text-decoration: none; color: inherit;
+  }
+  .game-row:hover { background: var(--bg-card-hover); }
+  .rbadge {
+    flex: none; min-width: 20px; padding: 0 5px; height: 16px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff; line-height: 1;
+  }
+  .rbadge.win { background: var(--green); }
+  .rbadge.loss { background: var(--loss-red); }
+  .rbadge.draw { background: var(--draw-gray); }
+  .game-row .gopp {
+    flex: 1; min-width: 0; color: var(--text-secondary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .game-row .gopp .grating { color: var(--text-muted); }
+  .game-row .gopp.replayable { cursor: pointer; }
+  .game-row .gopp.replayable:hover {
+    color: var(--text-primary);
+    text-decoration: underline; text-decoration-color: var(--green);
+  }
+  .game-row .gopp.replayable:hover .grating { color: var(--text-secondary); }
+  .game-row .gdate { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  a.gdate { text-decoration: none; }
+  a.gdate:hover { color: var(--green); text-decoration: underline; }
+  .game-more {
+    padding: 6px 12px 8px 22px; font-size: 12px; font-weight: 600;
+    color: var(--green); cursor: pointer;
+  }
+  .game-more:hover { background: var(--bg-card-hover); }
+  .empty-note { color: var(--text-muted); text-align: center; padding: 30px 10px; }
+
+  /* ---- accounts ---- */
+  .auth-area { margin-left: auto; display: flex; align-items: center; gap: 10px; position: relative; }
+  #user-menu-btn {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 12px; font-size: 13px; cursor: pointer; max-width: 220px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #user-menu-btn:hover { border-color: var(--green); }
+  #user-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); overflow: hidden; z-index: 60;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55); display: none;
+  }
+  #user-menu.open { display: block; }
+  #user-menu button {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    color: var(--text-primary); padding: 10px 14px; font-size: 14px; cursor: pointer;
+  }
+  #user-menu button:hover { background: var(--bg-card-hover); }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); padding: 24px; width: min(92vw, 380px);
+    display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  }
+  .modal h2 { margin: 0 0 2px; font-size: 18px; }
+  .modal label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .modal input {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 10px; font-size: 14px; width: 100%; outline: none;
+  }
+  .modal input:focus { border-color: var(--green); }
+  .modal .form-msg { font-size: 13px; min-height: 18px; color: var(--text-muted); }
+  .modal .form-msg.error { color: var(--loss-red); }
+  .modal .form-msg.ok { color: var(--green); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 2px; }
+  .modal-actions .primary { flex: 1; }
+  button.ghost {
+    flex: 1; background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--green); background: var(--bg-card-hover); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Chess Repertoire <span>Explorer</span></h1>
+  <div class="controls">
+    <input id="username" type="text" placeholder="chess.com username" spellcheck="false">
+    <button class="primary" id="analyze-btn">Analyze</button>
+    <span id="status"></span>
+  </div>
+  <div class="auth-area">
+    <button class="primary" id="analyze-me-btn" style="display:none">Analyze my games</button>
+    <button class="primary" id="auth-open-btn">Log in / Sign up</button>
+    <button id="user-menu-btn" style="display:none"></button>
+    <div id="user-menu">
+      <button id="menu-settings">Account settings</button>
+      <button id="menu-logout">Log out</button>
+    </div>
+  </div>
+</header>
+
+<div class="modal-overlay" id="auth-modal">
+  <div class="modal">
+    <h2>Welcome back</h2>
+    <label>Email
+      <input id="auth-email" type="email" placeholder="you@example.com" spellcheck="false">
+    </label>
+    <label>Password
+      <input id="auth-password" type="password" placeholder="At least 8 characters">
+    </label>
+    <div class="form-msg" id="auth-msg"></div>
+    <div class="modal-actions">
+      <button class="primary" id="auth-login-btn">Log in</button>
+      <button class="ghost" id="auth-register-btn">Create account</button>
+    </div>
+    <div class="modal-actions">
+      <button class="ghost" id="auth-cancel-btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h2>Account settings</h2>
+    <label>chess.com username
+      <input id="settings-chesscom" type="text" placeholder="e.g. flute5" spellcheck="false">
+    </label>
+    <label>lichess username
+      <input id="settings-lichess" type="text" placeholder="e.g. flute5" spellcheck="false">
+    </label>
+    <div class="form-msg" id="settings-msg"></div>
+    <div class="modal-actions">
+      <button class="primary" id="settings-save-btn">Save</button>
+      <button class="ghost" id="settings-cancel-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <section class="board-panel">
+    <div id="line-title">Analysis board</div>
+    <div class="board-row">
+      <div id="evalbar"><div class="tick"></div><div class="white-fill"></div></div>
+      <div id="board"></div>
+    </div>
+    <div class="nav">
+      <button id="nav-start" title="Start">|&#8249;</button>
+      <button id="nav-prev" title="Previous move">&#8249;</button>
+      <button id="nav-next" title="Next move">&#8250;</button>
+      <button id="nav-end" title="End">&#8250;|</button>
+      <button id="nav-reset" title="Reset board">&#8634;</button>
+      <button id="best-move-btn" title="Show best move">&#9678;</button>
+    </div>
+    <div id="engine-panel">
+      <div id="engine-head">
+        <span id="engine-score">0.0</span>
+        <span id="engine-label">Stockfish</span>
+      </div>
+      <div id="engine-pv"></div>
+    </div>
+    <div id="line-moves"><span class="placeholder">Pick an opening line on the right to replay it here.</span></div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="range-wrap" id="range-wrap">
+      <button id="range-btn" type="button">
+        <span class="cal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg></span>
+        <span class="range-label" id="range-label">Last 12 months</span>
+        <span class="range-chev">&#9660;</span>
+      </button>
+      <div id="range-panel">
+        <button class="preset" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
+        <button class="preset" type="button" data-preset="3m"><span class="tick">&#10003;</span>Last 3 months</button>
+        <button class="preset" type="button" data-preset="6m"><span class="tick">&#10003;</span>Last 6 months</button>
+        <button class="preset selected" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
+        <button class="preset" type="button" data-preset="ytd"><span class="tick">&#10003;</span>This year</button>
+        <button class="preset" type="button" data-preset="all"><span class="tick">&#10003;</span>All time</button>
+        <div class="range-custom">
+          <div class="rc-title">Custom range</div>
+          <div class="rc-row"><span>From</span><input type="date" id="range-from"></div>
+          <div class="rc-row"><span>To</span><input type="date" id="range-to"></div>
+          <div id="range-msg"></div>
+          <button id="range-apply" type="button">Apply</button>
+        </div>
+      </div>
+    </div>
+    <div class="tc-group" id="tc-group">
+      <label><input type="checkbox" value="rapid" checked>Rapid</label>
+      <label><input type="checkbox" value="blitz" checked>Blitz</label>
+      <label><input type="checkbox" value="bullet" checked>Bullet</label>
+    </div>
+    <div class="color-tabs">
+      <button id="tab-white" class="active">As White</button>
+      <button id="tab-black">As Black</button>
+    </div>
+    <div id="summary"></div>
+    <div id="openings">
+      <div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>
+    </div>
+  </aside>
+</main>
+
+<script type="module">
+import { Chess } from "/vendor/chess.js";
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+const state = {
+  report: null,
+  range: { preset: "12m", since: null, until: null },  // time-frame filter
+  color: "white",           // which tab is shown
+  ply: 0,                   // 0 = start position
+  sans: [],                 // SAN of every move in the current game
+  fens: [START_FEN],        // fens[i] = position after i plies
+  moves: [],                // verbose chess.js move objects
+};
+
+/* ---------- game model (chess.js) ---------- */
+
+let game = new Chess();     // full played game (may extend past state.ply)
+
+function rebuildDerived() {
+  const verbose = game.history({ verbose: true });
+  state.moves = verbose;
+  state.sans = verbose.map(m => m.san);
+  state.fens = [START_FEN, ...verbose.map(m => m.after)];
+}
+
+function truncateToPly() {
+  // drop moves after the current ply (standard analysis-board behavior)
+  const keep = state.moves.slice(0, state.ply);
+  game = new Chess();
+  for (const m of keep) game.move({ from: m.from, to: m.to, promotion: m.promotion });
+  rebuildDerived();
+}
+
+function makeUserMove(from, to, promotion) {
+  if (state.ply < state.sans.length) truncateToPly();
+  try {
+    game.move({ from, to, promotion });
+  } catch (e) {
+    return false;
+  }
+  rebuildDerived();
+  state.ply = state.sans.length;
+  refreshBoard();
+  return true;
+}
+
+/* ---------- board rendering ---------- */
+
+const boardEl = document.getElementById("board");
+
+function renderBoard(fen, orientation, hlSquares) {
+  const rows = fen.split(" ")[0].split("/");
+  // grid[rank 8..1][file a..h]
+  const grid = rows.map(row => {
+    const cells = [];
+    for (const ch of row) {
+      if (/\d/.test(ch)) for (let i = 0; i < +ch; i++) cells.push(null);
+      else cells.push(ch);
+    }
+    return cells;
+  });
+
+  boardEl.innerHTML = "";
+  const idx = [0,1,2,3,4,5,6,7];
+  const ranks = orientation === "black" ? [...idx].reverse() : idx;
+  const files = orientation === "black" ? [...idx].reverse() : idx;
+  for (const r of ranks) {          // r: 0 = rank 8
+    for (const f of files) {        // f: 0 = file a
+      const sq = document.createElement("div");
+      const light = (r + f) % 2 === 0;
+      sq.className = "sq " + (light ? "light" : "dark");
+      const sqName = "abcdefgh"[f] + (8 - r);
+      sq.dataset.square = sqName;
+      if (hlSquares && hlSquares.has(sqName)) sq.classList.add("hl");
+      const pc = grid[r][f];
+      if (pc) {
+        const img = document.createElement("img");
+        const isWhite = pc === pc.toUpperCase();
+        img.className = "piece";
+        img.src = "/pieces/" + (isWhite ? "w" : "b") + pc.toLowerCase() + ".png";
+        img.alt = pc;
+        img.draggable = false;
+        sq.appendChild(img);
+      }
+      if (r === ranks[ranks.length - 1]) {
+        const c = document.createElement("span");
+        c.className = "coord file"; c.textContent = "abcdefgh"[f];
+        sq.appendChild(c);
+      }
+      if (f === files[0]) {
+        const c = document.createElement("span");
+        c.className = "coord rank"; c.textContent = 8 - r;
+        sq.appendChild(c);
+      }
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+function diffSquares(fenA, fenB) {
+  // squares whose contents changed between two FENs -> highlight last move
+  const expand = fen => {
+    const out = {};
+    fen.split(" ")[0].split("/").forEach((row, r) => {
+      let f = 0;
+      for (const ch of row) {
+        if (/\d/.test(ch)) { f += +ch; continue; }
+        out["abcdefgh"[f] + (8 - r)] = ch;
+        f++;
+      }
+    });
+    return out;
+  };
+  const a = expand(fenA), b = expand(fenB), changed = new Set();
+  for (const s of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (a[s] !== b[s]) changed.add(s);
+  }
+  return changed;
+}
+
+function currentFen() {
+  return state.fens[state.ply];
+}
+
+function refreshBoard() {
+  let hl = null;
+  if (state.ply > 0) {
+    hl = diffSquares(state.fens[state.ply - 1], currentFen());
+  }
+  clearSelection();
+  renderBoard(currentFen(), state.color, hl);
+  markMovablePieces();
+  renderMoveList();
+  scheduleEval();
+}
+
+/* ---------- Stockfish evaluation ---------- */
+
+const enginePanel = document.getElementById("engine-panel");
+const evalFill = document.querySelector("#evalbar .white-fill");
+const scoreEl = document.getElementById("engine-score");
+const labelEl = document.getElementById("engine-label");
+const pvEl = document.getElementById("engine-pv");
+
+let engineAvailable = null;   // null = unknown, then true/false
+let evalTimer = null;
+let evalToken = 0;
+const evalCache = new Map();
+
+function scheduleEval() {
+  if (engineAvailable === false) return;
+  clearTimeout(evalTimer);
+  if (typeof isAnimatingLine === "function" && isAnimatingLine()) return;   // no per-step evals while replaying a line
+  const fen = currentFen();
+  if (evalCache.has(fen)) { renderEval(evalCache.get(fen)); return; }
+  labelEl.textContent = "Stockfish \u2014 thinking\u2026";
+  evalTimer = setTimeout(() => fetchEval(fen), 200);
+}
+
+async function fetchEval(fen) {
+  const token = ++evalToken;
+  try {
+    const resp = await fetch(`/api/eval?fen=${encodeURIComponent(fen)}`);
+    if (resp.status === 503) {
+      engineAvailable = false;
+      enginePanel.classList.remove("visible");
+      return;
+    }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    engineAvailable = true;
+    evalCache.set(fen, data);
+    if (token === evalToken && fen === currentFen()) renderEval(data);
+  } catch (e) {
+    if (token === evalToken) labelEl.textContent = "Stockfish \u2014 " + e.message;
+  }
+}
+
+function renderEval(data) {
+  enginePanel.classList.add("visible");
+  let text, whiteShare;
+  if (data.mate !== null) {
+    text = (data.mate > 0 ? "M" : "-M") + Math.abs(data.mate);
+    whiteShare = data.mate > 0 ? 1 : 0;
+  } else {
+    const p = data.cp / 100;
+    text = (p > 0 ? "+" : "") + p.toFixed(1);
+    whiteShare = 1 / (1 + Math.exp(-p / 1.5));   // squash to 0..1
+  }
+  scoreEl.textContent = text;
+  scoreEl.className = (data.mate !== null ? data.mate > 0 : data.cp >= 0)
+    ? "white-adv" : "black-adv";
+  labelEl.textContent = `Stockfish \u2014 depth ${data.depth}`;
+  evalFill.style.height = (whiteShare * 100).toFixed(1) + "%";
+  pvEl.innerHTML = data.best_san
+    ? `Best: <b>${data.best_san}</b> &nbsp; ${data.pv_san}`
+    : "";
+  if (showBestMove && data.best_san) {
+    const mv = parseBestMove(currentFen(), data.best_san);
+    if (mv) drawBestArrow(mv.from, mv.to);
+    else clearBestArrow();
+  } else if (!showBestMove) {
+    clearBestArrow();
+  }
+}
+
+/* ---------- best-move arrow ---------- */
+
+const BEST_MOVE_LS = "showBestMove";
+let showBestMove = localStorage.getItem(BEST_MOVE_LS) === "true";
+const bestMoveBtn = document.getElementById("best-move-btn");
+
+function updateBestMoveBtn() {
+  bestMoveBtn.classList.toggle("active", showBestMove);
+}
+
+function setShowBestMove(on) {
+  showBestMove = on;
+  localStorage.setItem(BEST_MOVE_LS, on ? "true" : "false");
+  updateBestMoveBtn();
+  if (on) scheduleEval();
+  else clearBestArrow();
+}
+
+bestMoveBtn.classList.toggle("active", showBestMove);
+bestMoveBtn.onclick = () => setShowBestMove(!showBestMove);
+
+function sqToCenter(sq, orientation) {
+  const file = sq.charCodeAt(0) - 97;
+  const rank = +sq[1];
+  if (orientation === "black") return { x: 7 - file + 0.5, y: rank - 0.5 };
+  return { x: file + 0.5, y: 8 - rank + 0.5 };
+}
+
+function parseBestMove(fen, bestSan) {
+  try {
+    const c = new Chess(fen);
+    const m = c.move(bestSan);
+    return m ? { from: m.from, to: m.to } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+let bestArrowEl = null;
+
+function ensureBestArrowLayer() {
+  if (bestArrowEl && boardEl.contains(bestArrowEl)) return bestArrowEl;
+  bestArrowEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  bestArrowEl.id = "best-arrow";
+  bestArrowEl.setAttribute("viewBox", "0 0 8 8");
+  bestArrowEl.setAttribute("preserveAspectRatio", "none");
+  boardEl.appendChild(bestArrowEl);
+  return bestArrowEl;
+}
+
+function clearBestArrow() {
+  if (bestArrowEl) bestArrowEl.replaceChildren();
+}
+
+function drawBestArrow(from, to) {
+  const svg = ensureBestArrowLayer();
+  svg.replaceChildren();
+  const a = sqToCenter(from, state.color);
+  const b = sqToCenter(to, state.color);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const margin = 0.22;
+  const headLen = 0.38;
+  const headW = 0.28;
+  const x1 = a.x + ux * margin, y1 = a.y + uy * margin;
+  const tipX = b.x - ux * margin, tipY = b.y - uy * margin;
+  const baseX = tipX - ux * headLen, baseY = tipY - uy * headLen;
+  const px = -uy, py = ux;
+  const green = "rgba(129, 182, 76, 0.8)";
+
+  const shaft = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  shaft.setAttribute("x1", x1); shaft.setAttribute("y1", y1);
+  shaft.setAttribute("x2", baseX); shaft.setAttribute("y2", baseY);
+  shaft.setAttribute("stroke", green);
+  shaft.setAttribute("stroke-width", "0.28");
+  shaft.setAttribute("stroke-linecap", "round");
+
+  const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  head.setAttribute("points",
+    `${tipX},${tipY} ${baseX + px * headW},${baseY + py * headW} ${baseX - px * headW},${baseY - py * headW}`);
+  head.setAttribute("fill", green);
+
+  svg.append(shaft, head);
+}
+
+/* ---------- move list / navigation ---------- */
+
+const movesEl = document.getElementById("line-moves");
+const titleEl = document.getElementById("line-title");
+
+function renderMoveList() {
+  movesEl.innerHTML = "";
+  if (!state.sans.length) {
+    movesEl.innerHTML = '<span class="placeholder">Move a piece to start analyzing, or pick an opening line on the right.</span>';
+    return;
+  }
+  state.sans.forEach((mv, i) => {
+    if (i % 2 === 0) {
+      const num = document.createElement("span");
+      num.className = "mvnum";
+      num.textContent = (i / 2 + 1) + ".";
+      movesEl.appendChild(num);
+    }
+    const el = document.createElement("span");
+    el.className = "mv" + (state.ply === i + 1 ? " cur" : "");
+    el.textContent = mv;
+    el.onclick = () => { state.ply = i + 1; refreshBoard(); };
+    movesEl.appendChild(el);
+  });
+}
+
+function setPly(p) {
+  state.ply = Math.max(0, Math.min(state.sans.length, p));
+  refreshBoard();
+}
+function clearGamesFilters() {
+  document.querySelectorAll(".line.active").forEach(el => {
+    el.classList.remove("active");
+    const cont = el.closest(".lines");
+    if (cont && cont._renderGames) cont._renderGames(null);
+  });
+}
+
+function resetGame(title) {
+  game = new Chess();
+  rebuildDerived();
+  state.ply = 0;
+  titleEl.textContent = title || "Analysis board";
+  clearGamesFilters();
+  refreshBoard();
+}
+document.getElementById("nav-start").onclick = () => setPly(0);
+document.getElementById("nav-prev").onclick = () => setPly(state.ply - 1);
+document.getElementById("nav-next").onclick = () => setPly(state.ply + 1);
+document.getElementById("nav-end").onclick = () => setPly(Infinity);
+document.getElementById("nav-reset").onclick = () => resetGame();
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); setPly(state.ply - 1); }
+  if (e.key === "ArrowRight") { e.preventDefault(); setPly(state.ply + 1); }
+});
+
+/* ---------- line replay animation ---------- */
+
+const LINE_ANIM_MS = 350;
+const GAME_PREVIEW_PLIES = 10;  // animate first 5 full moves on game click
+let lineAnim = null;   // interval id while auto-playing a line, else null
+
+function isAnimatingLine() {
+  return lineAnim !== null;
+}
+
+function cancelLineAnim(rescheduleEval = true) {
+  if (lineAnim === null) return;
+  clearInterval(lineAnim);
+  lineAnim = null;
+  // evals were suppressed during the replay; catch up for wherever we stopped
+  if (rescheduleEval) scheduleEval();
+}
+
+function animateLine(maxPly) {
+  cancelLineAnim(false);
+  const target = maxPly === undefined
+    ? state.sans.length
+    : Math.min(maxPly, state.sans.length);
+  if (state.ply >= target) { refreshBoard(); return; }
+  lineAnim = setInterval(() => {
+    state.ply++;
+    // stop animating BEFORE the final refresh so its scheduleEval() runs
+    if (state.ply >= target) cancelLineAnim(false);
+    refreshBoard();
+  }, LINE_ANIM_MS);
+  refreshBoard();   // paint the start position; evals stay suppressed until the end
+}
+
+// Any user interaction (nav buttons, squares, move list, another line, arrows)
+// cancels the replay first (capture phase), then the click/key is honored normally.
+document.addEventListener("pointerdown", () => cancelLineAnim(), true);
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") cancelLineAnim();
+}, true);
+
+function loadLine(line, openingName) {
+  // Seed the analyzer game with the line's moves; user can take over anywhere.
+  const g = new Chess();
+  for (const san of line.san) {
+    try { g.move(san); }
+    catch (e) { break; }
+  }
+  game = g;
+  rebuildDerived();
+  state.ply = 0;
+  titleEl.textContent = line.name;
+  clearGamesFilters();
+  const el = document.querySelector(`.line[data-key="${CSS.escape(openingName + "||" + line.name)}"]`);
+  if (el) {
+    el.classList.add("active");
+    const cont = el.closest(".lines");
+    if (cont && cont._renderGames) cont._renderGames(line.name);
+  }
+  animateLine();   // paints the start position, then replays the whole variation
+}
+
+function loadGameReplay(g) {
+  // Load the full game into the analyzer; preview only the first 5 moves.
+  const gm = new Chess();
+  for (const san of g.san) {
+    try { gm.move(san); }
+    catch (e) { break; }
+  }
+  game = gm;
+  rebuildDerived();
+  state.ply = 0;
+  const rating = g.opponent_rating ? ` (${g.opponent_rating})` : "";
+  titleEl.textContent = g.opponent + rating + (g.date ? " \u2014 " + g.date : "");
+  // Keep any variation filter/highlight: the user is browsing that list.
+  animateLine(GAME_PREVIEW_PLIES);
+}
+
+/* ---------- sidebar ---------- */
+
+const openingsEl = document.getElementById("openings");
+const summaryEl = document.getElementById("summary");
+
+function renderSidebar() {
+  openingsEl.innerHTML = "";
+  if (!state.report) {
+    openingsEl.innerHTML = '<div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>';
+    summaryEl.textContent = "";
+    return;
+  }
+  const rep = state.report[state.color];
+  summaryEl.textContent =
+    `${rep.total_games} games as ${state.color} \u2014 ${rep.score}% score`;
+
+  if (!rep.openings.length) {
+    openingsEl.innerHTML = '<div class="empty-note">No games match the selected time controls.</div>';
+    return;
+  }
+
+  for (const op of rep.openings) {
+    const box = document.createElement("div");
+    box.className = "opening";
+
+    const head = document.createElement("div");
+    head.className = "opening-head";
+    head.innerHTML =
+      `<span class="chev">\u25B8</span>` +
+      `<span class="name">${op.name}</span>` +
+      `<span class="meta">${op.games} games \u00B7 ${op.score}%</span>` +
+      `<span class="scorebar"><i style="width:${op.score}%"></i></span>`;
+    head.onclick = () => box.classList.toggle("open");
+    box.appendChild(head);
+
+    const lines = document.createElement("div");
+    lines.className = "lines";
+    for (const v of op.variations) {
+      const row = document.createElement("div");
+      row.className = "line";
+      row.dataset.key = op.name + "||" + v.name;
+      row.innerHTML =
+        `<span class="lname">${v.name}</span>` +
+        `<span class="lgames">${v.games} game${v.games === 1 ? "" : "s"}</span>`;
+      if (!v.san.length) {
+        row.style.opacity = ".5";
+        row.title = "No replayable moves found for this line";
+      }
+      row.onclick = () => {
+        if (row.classList.contains("active")) {
+          // Second click deselects the line and restores the full games list.
+          row.classList.remove("active");
+          if (lines._renderGames) lines._renderGames(null);
+          return;
+        }
+        if (v.san.length) loadLine(v, op.name);
+      };
+      lines.appendChild(row);
+    }
+    appendGamesSection(lines, op);
+    box.appendChild(lines);
+    openingsEl.appendChild(box);
+  }
+}
+
+const GAMES_SHOWN_INITIALLY = 25;
+
+function makeGameRow(g) {
+  const row = document.createElement("div");
+  row.className = "game-row";
+
+  const badge = document.createElement("span");
+  badge.className = "rbadge " + g.result;
+  badge.textContent = g.result === "win" ? "W" : g.result === "loss" ? "L" : "D";
+
+  // Opponent zone: click replays the game's opening moves on the board.
+  const opp = document.createElement("span");
+  opp.className = "gopp";
+  opp.textContent = g.opponent;
+  if (g.opponent_rating) {
+    const r = document.createElement("span");
+    r.className = "grating";
+    r.textContent = ` (${g.opponent_rating})`;
+    opp.appendChild(r);
+  }
+  if (g.san && g.san.length) {
+    opp.classList.add("replayable");
+    opp.title = (g.variation ? g.variation + " \u2014 " : "") + "Replay opening moves on the board";
+    opp.onclick = () => loadGameReplay(g);
+  } else if (g.variation) {
+    opp.title = g.variation;
+  }
+
+  // Date zone: link to the game on chess.com / lichess.
+  let date;
+  if (g.url) {
+    date = document.createElement("a");
+    date.href = g.url;
+    date.target = "_blank";
+    date.rel = "noopener";
+    date.title = "Open game on " + (g.url.includes("lichess.org") ? "lichess" : "chess.com");
+  } else {
+    date = document.createElement("span");
+  }
+  date.className = "gdate";
+  date.textContent = g.date || "";
+
+  row.append(badge, opp, date);
+  return row;
+}
+
+function appendGamesSection(lines, op) {
+  const gl = op.game_list || [];
+  if (!gl.length) return;
+
+  const head = document.createElement("div");
+  head.className = "games-head";
+  lines.appendChild(head);
+
+  const rows = document.createElement("div");
+  rows.className = "game-rows";
+  lines.appendChild(rows);
+
+  // Renders the games list, optionally filtered to one variation
+  // (matched on the exact variation name from the payload).
+  function render(variationName) {
+    const filtered = variationName == null
+      ? gl : gl.filter(g => g.variation === variationName);
+    const count = variationName == null ? op.games : filtered.length;
+
+    head.innerHTML = "";
+    head.appendChild(document.createTextNode(`Games (${count})`));
+    if (variationName != null) {
+      const label = document.createElement("span");
+      label.className = "gfilter";
+      label.textContent = `\u2014 ${variationName}`;
+      label.title = variationName;
+      const clear = document.createElement("span");
+      clear.className = "gclear";
+      clear.textContent = "All games";
+      clear.title = "Clear the variation filter";
+      clear.onclick = () => {
+        // Keep the board as-is; just drop the filter and line highlight.
+        const active = lines.querySelector(".line.active");
+        if (active) active.classList.remove("active");
+        render(null);
+      };
+      head.append(label, clear);
+    }
+
+    rows.innerHTML = "";
+    for (const g of filtered.slice(0, GAMES_SHOWN_INITIALLY)) rows.appendChild(makeGameRow(g));
+    if (filtered.length > GAMES_SHOWN_INITIALLY) {
+      const more = document.createElement("div");
+      more.className = "game-more";
+      more.textContent = `Show ${filtered.length - GAMES_SHOWN_INITIALLY} more`;
+      more.onclick = () => {
+        more.remove();
+        for (const g of filtered.slice(GAMES_SHOWN_INITIALLY)) rows.appendChild(makeGameRow(g));
+      };
+      rows.appendChild(more);
+    }
+  }
+
+  lines._renderGames = render;
+  render(null);
+}
+
+function setColor(color) {
+  state.color = color;
+  document.getElementById("tab-white").classList.toggle("active", color === "white");
+  document.getElementById("tab-black").classList.toggle("active", color === "black");
+  renderSidebar();
+  resetGame();
+}
+document.getElementById("tab-white").onclick = () => setColor("white");
+document.getElementById("tab-black").onclick = () => setColor("black");
+
+/* ---------- fetching ---------- */
+
+const statusEl = document.getElementById("status");
+const btn = document.getElementById("analyze-btn");
+const meBtn = document.getElementById("analyze-me-btn");
+
+let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" report)
+
+async function runReport(url, fetchingMsg) {
+  const tcs = [...document.querySelectorAll("#tc-group input:checked")].map(c => c.value);
+  if (!tcs.length) { statusEl.textContent = "Pick at least one time control."; statusEl.className = "error"; return; }
+
+  btn.disabled = true;
+  meBtn.disabled = true;
+  statusEl.className = "";
+  statusEl.textContent = fetchingMsg;
+  try {
+    const resp = await fetch(`${url}&time_classes=${tcs.join(",")}${rangeQuery()}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    state.report = data;
+    let msg = `${data.analyzed_games} rated games analyzed (${
+      data.since || data.until ? rangeLabel.textContent : `last ${data.months} months`})`;
+    if (data.warnings && data.warnings.length) msg += ` \u2014 ${data.warnings.join("; ")}`;
+    statusEl.textContent = msg;
+    if (data.warnings && data.warnings.length) statusEl.className = "error";
+    setColor(state.color);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "error";
+  } finally {
+    btn.disabled = false;
+    meBtn.disabled = false;
+  }
+}
+
+async function analyzeUser() {
+  const username = document.getElementById("username").value.trim();
+  if (!username) { statusEl.textContent = "Enter a username first."; statusEl.className = "error"; return; }
+  lastAnalyze = analyzeUser;
+  await runReport(
+    `/api/report?username=${encodeURIComponent(username)}`,
+    "Fetching games from chess.com\u2026 (first run can take ~20s)"
+  );
+}
+
+async function analyzeMe() {
+  lastAnalyze = analyzeMe;
+  await runReport(
+    "/api/report/me?1=1",
+    "Fetching games from your linked accounts\u2026 (first run can take ~20s)"
+  );
+}
+
+btn.onclick = analyzeUser;
+meBtn.onclick = analyzeMe;
+document.getElementById("username").addEventListener("keydown", e => {
+  if (e.key === "Enter") analyzeUser();
+});
+document.getElementById("tc-group").addEventListener("change", () => {
+  if (state.report) lastAnalyze();   // live re-filter once a report is loaded
+});
+
+/* ---------- time-frame filter ---------- */
+
+const rangeWrap = document.getElementById("range-wrap");
+const rangeBtn = document.getElementById("range-btn");
+const rangeLabel = document.getElementById("range-label");
+const rangeFromEl = document.getElementById("range-from");
+const rangeToEl = document.getElementById("range-to");
+const rangeMsgEl = document.getElementById("range-msg");
+
+function isoLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const RANGE_PRESETS = {
+  "30d": { label: "Last 30 days",   since: () => { const d = new Date(); d.setDate(d.getDate() - 30); return isoLocal(d); } },
+  "3m":  { label: "Last 3 months",  since: () => { const d = new Date(); d.setMonth(d.getMonth() - 3); return isoLocal(d); } },
+  "6m":  { label: "Last 6 months",  since: () => { const d = new Date(); d.setMonth(d.getMonth() - 6); return isoLocal(d); } },
+  "12m": { label: "Last 12 months", since: () => null },     // backend default window
+  "ytd": { label: "This year",      since: () => `${new Date().getFullYear()}-01-01` },
+  "all": { label: "All time",       since: () => "2005-01-01" },  // predates chess.com archives
+};
+
+function rangeQuery() {
+  let q = "";
+  if (state.range.since) q += `&since=${state.range.since}`;
+  if (state.range.until) q += `&until=${state.range.until}`;
+  return q;
+}
+
+function prettyDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d)
+    .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function setRangePanelOpen(open) {
+  rangeWrap.classList.toggle("open", open);
+}
+
+function markSelectedPreset(preset) {
+  document.querySelectorAll("#range-panel .preset")
+    .forEach(b => b.classList.toggle("selected", b.dataset.preset === preset));
+}
+
+function applyRange(range, label) {
+  state.range = range;
+  rangeLabel.textContent = label;
+  markSelectedPreset(range.preset);
+  setRangePanelOpen(false);
+  if (state.report) lastAnalyze();   // live re-filter, same as the pills
+}
+
+rangeBtn.onclick = e => {
+  e.stopPropagation();
+  setRangePanelOpen(!rangeWrap.classList.contains("open"));
+};
+document.addEventListener("click", e => {
+  if (!rangeWrap.contains(e.target)) setRangePanelOpen(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") setRangePanelOpen(false);
+});
+
+for (const b of document.querySelectorAll("#range-panel .preset")) {
+  b.onclick = () => {
+    const p = RANGE_PRESETS[b.dataset.preset];
+    rangeMsgEl.textContent = "";
+    applyRange({ preset: b.dataset.preset, since: p.since(), until: null }, p.label);
+  };
+}
+
+document.getElementById("range-apply").onclick = () => {
+  const from = rangeFromEl.value;
+  const to = rangeToEl.value;
+  if (!from && !to) { rangeMsgEl.textContent = "Pick at least one date."; return; }
+  if (from && to && from > to) { rangeMsgEl.textContent = "From must be before To."; return; }
+  rangeMsgEl.textContent = "";
+  const label = from && to ? `${prettyDate(from)} \u2013 ${prettyDate(to)}`
+    : from ? `Since ${prettyDate(from)}` : `Until ${prettyDate(to)}`;
+  applyRange({ preset: "custom", since: from || null, until: to || null }, label);
+};
+
+/* ---------- accounts ---------- */
+
+let currentUser = null;   // {email, chesscom_username, lichess_username} or null
+
+const authModal = document.getElementById("auth-modal");
+const settingsModal = document.getElementById("settings-modal");
+const authMsg = document.getElementById("auth-msg");
+const settingsMsg = document.getElementById("settings-msg");
+const authOpenBtn = document.getElementById("auth-open-btn");
+const userMenuBtn = document.getElementById("user-menu-btn");
+const userMenu = document.getElementById("user-menu");
+
+function setUser(user) {
+  currentUser = user;
+  const loggedIn = !!user;
+  authOpenBtn.style.display = loggedIn ? "none" : "";
+  userMenuBtn.style.display = loggedIn ? "" : "none";
+  meBtn.style.display = loggedIn ? "" : "none";
+  if (loggedIn) userMenuBtn.textContent = user.email;
+  else userMenu.classList.remove("open");
+}
+
+async function api(path, method, body) {
+  const resp = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  return data;
+}
+
+function setMsg(el, text, cls) {
+  el.textContent = text;
+  el.className = "form-msg" + (cls ? " " + cls : "");
+}
+
+async function submitAuth(path) {
+  const email = document.getElementById("auth-email").value.trim();
+  const password = document.getElementById("auth-password").value;
+  if (!email || !password) { setMsg(authMsg, "Enter your email and password.", "error"); return; }
+  setMsg(authMsg, "\u2026");
+  try {
+    const user = await api(path, "POST", { email, password });
+    setUser(user);
+    authModal.classList.remove("open");
+    document.getElementById("auth-password").value = "";
+    setMsg(authMsg, "");
+  } catch (e) {
+    setMsg(authMsg, e.message, "error");
+  }
+}
+
+authOpenBtn.onclick = () => {
+  setMsg(authMsg, "");
+  authModal.classList.add("open");
+  document.getElementById("auth-email").focus();
+};
+document.getElementById("auth-login-btn").onclick = () => submitAuth("/api/login");
+document.getElementById("auth-register-btn").onclick = () => submitAuth("/api/register");
+document.getElementById("auth-cancel-btn").onclick = () => authModal.classList.remove("open");
+document.getElementById("auth-password").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitAuth("/api/login");
+});
+
+userMenuBtn.onclick = e => {
+  e.stopPropagation();
+  userMenu.classList.toggle("open");
+};
+document.addEventListener("click", e => {
+  if (!userMenu.contains(e.target)) userMenu.classList.remove("open");
+});
+
+document.getElementById("menu-settings").onclick = () => {
+  userMenu.classList.remove("open");
+  document.getElementById("settings-chesscom").value = currentUser?.chesscom_username || "";
+  document.getElementById("settings-lichess").value = currentUser?.lichess_username || "";
+  setMsg(settingsMsg, "");
+  settingsModal.classList.add("open");
+};
+document.getElementById("menu-logout").onclick = async () => {
+  userMenu.classList.remove("open");
+  try { await api("/api/logout", "POST"); } catch (e) { /* session is client-side gone either way */ }
+  setUser(null);
+};
+
+document.getElementById("settings-save-btn").onclick = async () => {
+  setMsg(settingsMsg, "Saving\u2026");
+  try {
+    const user = await api("/api/me", "PUT", {
+      chesscom_username: document.getElementById("settings-chesscom").value.trim(),
+      lichess_username: document.getElementById("settings-lichess").value.trim(),
+    });
+    setUser(user);
+    setMsg(settingsMsg, "Saved.", "ok");
+  } catch (e) {
+    setMsg(settingsMsg, e.message, "error");
+  }
+};
+document.getElementById("settings-cancel-btn").onclick = () => settingsModal.classList.remove("open");
+
+for (const overlay of [authModal, settingsModal]) {
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) overlay.classList.remove("open");
+  });
+}
+
+(async function restoreSession() {
+  try {
+    setUser(await api("/api/me", "GET"));
+  } catch (e) {
+    setUser(null);
+  }
+})();
+
+/* ---------- piece interaction (click-click + drag-and-drop) ---------- */
+
+let selected = null;          // square name of the selected piece, or null
+let legalDests = new Map();   // dest square -> verbose move (for current selection)
+
+function positionAtPly() {
+  // chess.js instance for the position currently shown on the board
+  return new Chess(currentFen());
+}
+
+function clearSelection() {
+  selected = null;
+  legalDests = new Map();
+  hidePromoPicker();
+  boardEl.querySelectorAll(".sel, .dest, .capture")
+    .forEach(el => el.classList.remove("sel", "dest", "capture"));
+}
+
+function markMovablePieces() {
+  const pos = positionAtPly();
+  if (pos.isGameOver()) return;
+  const turn = pos.turn();
+  for (const sq of boardEl.querySelectorAll(".sq")) {
+    const pc = pos.get(sq.dataset.square);
+    if (pc && pc.color === turn) sq.classList.add("movable");
+  }
+}
+
+function selectSquare(sqName) {
+  clearSelection();
+  const pos = positionAtPly();
+  const moves = pos.moves({ square: sqName, verbose: true });
+  if (!moves.length) return false;
+  selected = sqName;
+  for (const m of moves) legalDests.set(m.to, m);
+  const selEl = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
+  if (selEl) selEl.classList.add("sel");
+  for (const [dest, m] of legalDests) {
+    const el = boardEl.querySelector(`.sq[data-square="${dest}"]`);
+    if (!el) continue;
+    el.classList.add("dest");
+    if (m.captured) el.classList.add("capture");
+  }
+  return true;
+}
+
+function tryMove(from, to) {
+  const m = legalDests.get(to);
+  if (!m) return false;
+  if (m.promotion) { showPromoPicker(from, to); return true; }
+  clearSelection();
+  makeUserMove(from, to);
+  return true;
+}
+
+/* promotion picker */
+let promoEl = null;
+function hidePromoPicker() {
+  if (promoEl) { promoEl.remove(); promoEl = null; }
+}
+function showPromoPicker(from, to) {
+  hidePromoPicker();
+  const pos = positionAtPly();
+  const color = pos.turn() === "w" ? "w" : "b";
+  const destEl = boardEl.querySelector(`.sq[data-square="${to}"]`);
+  if (!destEl) { makeUserMove(from, to, "q"); return; }
+
+  promoEl = document.createElement("div");
+  promoEl.id = "promo-picker";
+  for (const p of ["q", "n", "r", "b"]) {
+    const b = document.createElement("button");
+    const img = document.createElement("img");
+    img.src = `/pieces/${color}${p}.png`;
+    img.alt = p;
+    b.appendChild(img);
+    b.onclick = ev => {
+      ev.stopPropagation();
+      hidePromoPicker();
+      makeUserMove(from, to, p);
+    };
+    promoEl.appendChild(b);
+  }
+  boardEl.appendChild(promoEl);
+  // place next to the promotion square, growing downward into the board
+  const bRect = boardEl.getBoundingClientRect();
+  const dRect = destEl.getBoundingClientRect();
+  const left = Math.min(dRect.left - bRect.left, bRect.width - 64);
+  const top = dRect.top - bRect.top;
+  promoEl.style.left = left + "px";
+  promoEl.style.top = (top + promoEl.offsetHeight > bRect.height
+    ? Math.max(0, bRect.height - promoEl.offsetHeight) : top) + "px";
+}
+
+/* click-to-move */
+let justSelected = false;   // pointerdown selected this piece; don't deselect on the click
+
+boardEl.addEventListener("click", e => {
+  const sq = e.target.closest(".sq");
+  if (!sq || !boardEl.contains(sq)) return;
+  if (promoEl) { hidePromoPicker(); clearSelection(); return; }
+  const name = sq.dataset.square;
+  if (selected) {
+    if (name === selected) {
+      if (justSelected) { justSelected = false; return; }
+      clearSelection();
+      return;
+    }
+    justSelected = false;
+    if (tryMove(selected, name)) return;
+    // clicking another of my pieces re-selects; otherwise deselect
+    if (!selectSquare(name)) clearSelection();
+  } else {
+    selectSquare(name);
+  }
+});
+
+/* drag-and-drop via pointer events */
+let drag = null;   // { from, ghost, img, moved }
+
+boardEl.addEventListener("pointerdown", e => {
+  if (e.button !== 0 || promoEl) return;
+  const sq = e.target.closest(".sq");
+  if (!sq || !sq.classList.contains("movable")) return;
+  const img = sq.querySelector("img.piece");
+  if (!img) return;
+  const wasSelected = selected === sq.dataset.square;
+  if (!selectSquare(sq.dataset.square)) return;
+  justSelected = !wasSelected;
+
+  const rect = sq.getBoundingClientRect();
+  const ghost = img.cloneNode(true);
+  ghost.id = "drag-ghost";
+  ghost.style.width = rect.width * 0.92 + "px";
+  ghost.style.height = rect.height * 0.92 + "px";
+  document.body.appendChild(ghost);
+  drag = { from: sq.dataset.square, ghost, img, moved: false };
+  moveGhost(e);
+  e.preventDefault();
+});
+
+function moveGhost(e) {
+  drag.ghost.style.left = e.clientX - drag.ghost.offsetWidth / 2 + "px";
+  drag.ghost.style.top = e.clientY - drag.ghost.offsetHeight / 2 + "px";
+}
+
+document.addEventListener("pointermove", e => {
+  if (!drag) return;
+  if (!drag.moved) {
+    drag.moved = true;
+    drag.img.classList.add("dragging");
+  }
+  moveGhost(e);
+});
+
+document.addEventListener("pointerup", e => {
+  if (!drag) return;
+  const { from, ghost, img, moved } = drag;
+  drag = null;
+  ghost.remove();
+  img.classList.remove("dragging");
+  if (!moved) return;   // plain click: let the click handler manage selection
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  const sq = target && target.closest(".sq");
+  if (sq && boardEl.contains(sq) && sq.dataset.square !== from) {
+    if (!tryMove(from, sq.dataset.square)) clearSelection();
+  }
+  // dropped on the source square or a non-destination: keep selection for click-click
+});
+
+document.addEventListener("pointercancel", () => {
+  if (!drag) return;
+  drag.ghost.remove();
+  drag.img.classList.remove("dragging");
+  drag = null;
+});
+
+/* ---------- init ---------- */
+
+rebuildDerived();
+refreshBoard();
+</script>
+</body>
+</html>
