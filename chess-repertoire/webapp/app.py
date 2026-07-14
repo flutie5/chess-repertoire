@@ -20,7 +20,7 @@ import secrets
 import sqlite3
 import sys
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import chess
@@ -110,6 +110,7 @@ def _load_secret_key() -> str:
 
 
 app.secret_key = _load_secret_key()
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=90)
 
 
 def _db() -> sqlite3.Connection:
@@ -601,6 +602,34 @@ def update_me():
             )
         user = _current_user()
     return jsonify(_user_payload(user))
+
+
+@app.post("/api/me/password")
+def change_password():
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "not logged in"}), 401
+
+    data = _json_body()
+    current = data.get("current_password") or ""
+    new = data.get("new_password") or ""
+    if not current or not new:
+        return jsonify({"error": "Current and new password are required."}), 400
+    if len(new) < MIN_PASSWORD_LEN:
+        return jsonify({
+            "error": f"New password must be at least {MIN_PASSWORD_LEN} characters."
+        }), 400
+    if not check_password_hash(user["password_hash"], current):
+        return jsonify({"error": "Current password is incorrect."}), 401
+    if current == new:
+        return jsonify({"error": "New password must be different."}), 400
+
+    with _db() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(new), user["id"]),
+        )
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

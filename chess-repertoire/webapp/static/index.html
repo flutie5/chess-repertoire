@@ -84,16 +84,41 @@
   #status.error { color: var(--loss-red); }
 
   main {
-    display: grid; grid-template-columns: minmax(440px, 1fr) 420px;
-    gap: 20px; padding: 20px 22px; max-width: 1320px; margin: 0 auto;
+    display: grid; grid-template-columns: max-content 420px;
+    gap: 20px; padding: 20px 22px; max-width: none; width: fit-content;
+    margin: 0 auto; min-width: min(100%, 980px);
   }
-  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 1000px) {
+    main { grid-template-columns: 1fr; width: 100%; min-width: 0; }
+  }
 
   /* ---- board ---- */
-  .board-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .board-panel {
+    --board-px: 560px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+  }
   #line-title { font-weight: 700; text-align: center; min-height: 22px; }
-  .board-panel { --board-scale: 1; }
-  .board-row { display: flex; gap: 10px; align-items: stretch; width: min(100%, calc(600px * var(--board-scale))); }
+  .board-row {
+    display: flex; gap: 10px; align-items: stretch;
+    width: calc(var(--board-px) + 30px);
+  }
+  .board-frame {
+    position: relative; flex: none;
+    width: var(--board-px); height: var(--board-px);
+  }
+  #board-resize {
+    position: absolute; right: 0; bottom: 0;
+    width: 18px; height: 18px; z-index: 20;
+    cursor: nwse-resize; touch-action: none;
+    background:
+      linear-gradient(135deg, transparent 55%, rgba(255,255,255,.28) 55%, rgba(255,255,255,.28) 62%, transparent 62%),
+      linear-gradient(135deg, transparent 70%, rgba(255,255,255,.28) 70%, rgba(255,255,255,.28) 77%, transparent 77%);
+  }
+  #board-resize:hover {
+    background:
+      linear-gradient(135deg, transparent 55%, var(--green) 55%, var(--green) 62%, transparent 62%),
+      linear-gradient(135deg, transparent 70%, var(--green) 70%, var(--green) 77%, transparent 77%);
+  }
   #evalbar {
     width: 20px; border-radius: var(--radius-sm); overflow: hidden;
     background: #403d39; position: relative; flex: none;
@@ -112,7 +137,7 @@
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
-    flex: 1; aspect-ratio: 1; min-width: 0;
+    width: 100%; height: 100%;
     border-radius: var(--radius-sm); overflow: hidden;
     user-select: none; touch-action: none; position: relative;
   }
@@ -167,19 +192,13 @@
   .nav button:hover { background: var(--bg-card-hover); border-color: var(--green); }
   .nav button.active { background: var(--green); color: #fff; border-color: var(--green); }
   .nav button.active:hover { background: var(--green-hover); }
-  #board-size {
-    display: flex; gap: 6px; align-items: center; margin-left: 10px;
-    color: var(--text-secondary, #999); font-size: 12px;
-  }
-  #board-size input[type="range"] { width: 90px; accent-color: var(--green); cursor: pointer; }
-  #board-size .pct { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
   #best-arrow {
     position: absolute; inset: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 3;
   }
 
   #engine-panel {
-    width: min(100%, 600px); background: var(--bg-card);
+    width: calc(var(--board-px) + 30px); background: var(--bg-card);
     border: 1px solid var(--border-subtle); border-radius: var(--radius);
     padding: 10px 14px; display: none; gap: 4px; flex-direction: column;
   }
@@ -193,7 +212,7 @@
   #engine-pv b { color: var(--green); }
 
   #line-moves {
-    width: min(100%, 600px); min-height: 48px;
+    width: calc(var(--board-px) + 30px); min-height: 48px;
     background: var(--bg-card); border: 1px solid var(--border-subtle);
     border-radius: var(--radius);
     padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 4px 2px;
@@ -419,6 +438,54 @@
     padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
   }
   button.ghost:hover { border-color: var(--green); background: var(--bg-card-hover); }
+
+  /* ---- profile page ---- */
+  #profile-view {
+    display: none; max-width: 640px; margin: 24px auto; padding: 0 22px 40px;
+  }
+  #profile-view.open { display: block; }
+  body.profile-open main { display: none; }
+  body.profile-open #profile-view { display: block; }
+  .profile-card {
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); padding: 22px 24px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .profile-card + .profile-card { margin-top: 14px; }
+  .profile-card h2 {
+    margin: 0; font-size: 16px; font-weight: 700;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .profile-card h2 .back {
+    font-size: 13px; font-weight: 600; color: var(--text-muted);
+    background: none; border: 0; cursor: pointer; padding: 0;
+  }
+  .profile-card h2 .back:hover { color: var(--green); }
+  .profile-card .hint { margin: -6px 0 0; color: var(--text-muted); font-size: 13px; }
+  .profile-card label {
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 12px; color: var(--text-muted); font-weight: 600;
+  }
+  .profile-card input {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 9px 10px; font-size: 14px; outline: none;
+  }
+  .profile-card input:focus { border-color: var(--green); }
+  .profile-card input:disabled {
+    opacity: .7; cursor: not-allowed; color: var(--text-secondary);
+  }
+  .profile-row {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  .profile-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+    background: var(--bg-input); color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+  }
+  .profile-pill.ok { color: var(--green); border-color: rgba(129,182,76,.45); }
+  .profile-pill.miss { color: var(--warn-orange); border-color: rgba(229,143,42,.4); }
 </style>
 </head>
 <body>
@@ -435,7 +502,7 @@
     <button class="primary" id="auth-open-btn">Log in / Sign up</button>
     <button id="user-menu-btn" style="display:none"></button>
     <div id="user-menu">
-      <button id="menu-settings">Account settings</button>
+      <button id="menu-profile">Profile</button>
       <button id="menu-logout">Log out</button>
     </div>
   </div>
@@ -461,29 +528,66 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="settings-modal">
-  <div class="modal">
-    <h2>Account settings</h2>
+<section id="profile-view">
+  <div class="profile-card">
+    <h2>
+      Profile
+      <button type="button" class="back" id="profile-back">&#8592; Back to board</button>
+    </h2>
+    <p class="hint">Your account is stored on the server. Link your chess accounts so Analyze my games can pull your history.</p>
+    <label>Email
+      <input id="profile-email" type="email" disabled>
+    </label>
+    <div class="profile-row" id="profile-link-status"></div>
+  </div>
+
+  <div class="profile-card">
+    <h2>Linked chess accounts</h2>
+    <p class="hint">Save at least one username. You can still paste any username in the header bar without logging in.</p>
     <label>chess.com username
-      <input id="settings-chesscom" type="text" placeholder="e.g. flute5" spellcheck="false">
+      <input id="profile-chesscom" type="text" placeholder="e.g. flute5" spellcheck="false" autocomplete="off">
     </label>
     <label>lichess username
-      <input id="settings-lichess" type="text" placeholder="e.g. flute5" spellcheck="false">
+      <input id="profile-lichess" type="text" placeholder="e.g. flute5" spellcheck="false" autocomplete="off">
     </label>
-    <div class="form-msg" id="settings-msg"></div>
+    <div class="form-msg" id="profile-msg"></div>
     <div class="modal-actions">
-      <button class="primary" id="settings-save-btn">Save</button>
-      <button class="ghost" id="settings-cancel-btn">Close</button>
+      <button class="primary" id="profile-save-btn">Save profile</button>
+      <button class="ghost" id="profile-analyze-btn">Analyze my games</button>
     </div>
   </div>
-</div>
+
+  <div class="profile-card">
+    <h2>Change password</h2>
+    <label>Current password
+      <input id="profile-pw-current" type="password" autocomplete="current-password">
+    </label>
+    <label>New password
+      <input id="profile-pw-new" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+    </label>
+    <div class="form-msg" id="profile-pw-msg"></div>
+    <div class="modal-actions">
+      <button class="primary" id="profile-pw-btn">Update password</button>
+    </div>
+  </div>
+
+  <div class="profile-card">
+    <h2>Session</h2>
+    <div class="modal-actions">
+      <button class="ghost" id="profile-logout-btn">Log out</button>
+    </div>
+  </div>
+</section>
 
 <main>
   <section class="board-panel">
     <div id="line-title">Analysis board</div>
     <div class="board-row">
       <div id="evalbar"><div class="tick"></div><div class="white-fill"></div></div>
-      <div id="board"></div>
+      <div class="board-frame">
+        <div id="board"></div>
+        <div id="board-resize" title="Drag to resize board"></div>
+      </div>
     </div>
     <div class="nav">
       <button id="nav-start" title="Start">|&#8249;</button>
@@ -492,10 +596,6 @@
       <button id="nav-end" title="End">&#8250;|</button>
       <button id="nav-reset" title="Reset board">&#8634;</button>
       <button id="best-move-btn" title="Show best move">&#9678;</button>
-      <label id="board-size" title="Board size">
-        <input type="range" id="board-size-slider" min="70" max="130" step="5" value="100">
-        <span class="pct" id="board-size-pct">100%</span>
-      </label>
     </div>
     <div id="engine-panel">
       <div id="engine-head">
@@ -891,20 +991,46 @@ document.getElementById("nav-next").onclick = () => setPly(state.ply + 1);
 document.getElementById("nav-end").onclick = () => setPly(Infinity);
 document.getElementById("nav-reset").onclick = () => resetGame();
 
-const BOARD_SIZE_LS = "boardSizePct";
-const sizeSlider = document.getElementById("board-size-slider");
-const sizePct = document.getElementById("board-size-pct");
-function applyBoardSize(pct) {
-  pct = Math.min(130, Math.max(70, pct));
-  document.querySelector(".board-panel").style.setProperty("--board-scale", pct / 100);
-  sizeSlider.value = pct;
-  sizePct.textContent = pct + "%";
+const BOARD_PX_LS = "boardPx";
+const BOARD_PX_MIN = 320;
+const BOARD_PX_MAX = 960;
+const boardPanel = document.querySelector(".board-panel");
+const boardResize = document.getElementById("board-resize");
+
+function applyBoardPx(px) {
+  const max = Math.min(BOARD_PX_MAX, Math.max(BOARD_PX_MIN, window.innerWidth - 48));
+  px = Math.round(Math.min(max, Math.max(BOARD_PX_MIN, px)));
+  boardPanel.style.setProperty("--board-px", px + "px");
+  return px;
 }
-sizeSlider.addEventListener("input", () => {
-  applyBoardSize(Number(sizeSlider.value));
-  localStorage.setItem(BOARD_SIZE_LS, sizeSlider.value);
-});
-applyBoardSize(Number(localStorage.getItem(BOARD_SIZE_LS)) || 100);
+
+function initBoardResize() {
+  const saved = Number(localStorage.getItem(BOARD_PX_LS));
+  applyBoardPx(Number.isFinite(saved) && saved > 0 ? saved : 560);
+
+  let startX = 0, startY = 0, startPx = 560;
+  boardResize.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    boardResize.setPointerCapture(e.pointerId);
+    startX = e.clientX;
+    startY = e.clientY;
+    startPx = parseFloat(getComputedStyle(boardPanel).getPropertyValue("--board-px")) || 560;
+  });
+  boardResize.addEventListener("pointermove", e => {
+    if (!boardResize.hasPointerCapture(e.pointerId)) return;
+    // Drag diagonally: average delta so the square stays roughly under the cursor.
+    const delta = ((e.clientX - startX) + (e.clientY - startY)) / 2;
+    applyBoardPx(startPx + delta);
+  });
+  boardResize.addEventListener("pointerup", e => {
+    if (!boardResize.hasPointerCapture(e.pointerId)) return;
+    boardResize.releasePointerCapture(e.pointerId);
+    const px = parseFloat(getComputedStyle(boardPanel).getPropertyValue("--board-px")) || 560;
+    localStorage.setItem(BOARD_PX_LS, String(Math.round(px)));
+  });
+}
+initBoardResize();
+
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (e.key === "ArrowLeft") { e.preventDefault(); setPly(state.ply - 1); }
@@ -1313,17 +1439,17 @@ document.getElementById("range-apply").onclick = () => {
   applyRange({ preset: "custom", since: from || null, until: to || null }, label);
 };
 
-/* ---------- accounts ---------- */
+/* ---------- accounts / profile ---------- */
 
 let currentUser = null;   // {email, chesscom_username, lichess_username} or null
 
 const authModal = document.getElementById("auth-modal");
-const settingsModal = document.getElementById("settings-modal");
 const authMsg = document.getElementById("auth-msg");
-const settingsMsg = document.getElementById("settings-msg");
 const authOpenBtn = document.getElementById("auth-open-btn");
 const userMenuBtn = document.getElementById("user-menu-btn");
 const userMenu = document.getElementById("user-menu");
+const profileMsg = document.getElementById("profile-msg");
+const profilePwMsg = document.getElementById("profile-pw-msg");
 
 function setUser(user) {
   currentUser = user;
@@ -1331,13 +1457,47 @@ function setUser(user) {
   authOpenBtn.style.display = loggedIn ? "none" : "";
   userMenuBtn.style.display = loggedIn ? "" : "none";
   meBtn.style.display = loggedIn ? "" : "none";
-  if (loggedIn) userMenuBtn.textContent = user.email;
-  else userMenu.classList.remove("open");
+  if (loggedIn) {
+    userMenuBtn.textContent = user.email;
+    fillProfileForm(user);
+  } else {
+    userMenu.classList.remove("open");
+    closeProfile();
+  }
+}
+
+function fillProfileForm(user) {
+  document.getElementById("profile-email").value = user?.email || "";
+  document.getElementById("profile-chesscom").value = user?.chesscom_username || "";
+  document.getElementById("profile-lichess").value = user?.lichess_username || "";
+  const status = document.getElementById("profile-link-status");
+  const cc = (user?.chesscom_username || "").trim();
+  const li = (user?.lichess_username || "").trim();
+  status.innerHTML =
+    `<span class="profile-pill ${cc ? "ok" : "miss"}">chess.com: ${cc || "not linked"}</span>` +
+    `<span class="profile-pill ${li ? "ok" : "miss"}">lichess: ${li || "not linked"}</span>`;
+}
+
+function openProfile() {
+  if (!currentUser) {
+    authModal.classList.add("open");
+    return;
+  }
+  fillProfileForm(currentUser);
+  setMsg(profileMsg, "");
+  setMsg(profilePwMsg, "");
+  document.body.classList.add("profile-open");
+  userMenu.classList.remove("open");
+}
+
+function closeProfile() {
+  document.body.classList.remove("profile-open");
 }
 
 async function api(path, method, body) {
   const resp = await fetch(path, {
     method,
+    credentials: "include",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -1347,6 +1507,7 @@ async function api(path, method, body) {
 }
 
 function setMsg(el, text, cls) {
+  if (!el) return;
   el.textContent = text;
   el.className = "form-msg" + (cls ? " " + cls : "");
 }
@@ -1362,9 +1523,18 @@ async function submitAuth(path) {
     authModal.classList.remove("open");
     document.getElementById("auth-password").value = "";
     setMsg(authMsg, "");
+    // New accounts start empty — send them to Profile to link usernames.
+    const needsLinks = !(user.chesscom_username || user.lichess_username);
+    if (path === "/api/register" || needsLinks) openProfile();
   } catch (e) {
     setMsg(authMsg, e.message, "error");
   }
+}
+
+async function logout() {
+  userMenu.classList.remove("open");
+  try { await api("/api/logout", "POST"); } catch (e) { /* ignore */ }
+  setUser(null);
 }
 
 authOpenBtn.onclick = () => {
@@ -1384,42 +1554,52 @@ userMenuBtn.onclick = e => {
   userMenu.classList.toggle("open");
 };
 document.addEventListener("click", e => {
-  if (!userMenu.contains(e.target)) userMenu.classList.remove("open");
+  if (!userMenu.contains(e.target) && e.target !== userMenuBtn) {
+    userMenu.classList.remove("open");
+  }
 });
 
-document.getElementById("menu-settings").onclick = () => {
-  userMenu.classList.remove("open");
-  document.getElementById("settings-chesscom").value = currentUser?.chesscom_username || "";
-  document.getElementById("settings-lichess").value = currentUser?.lichess_username || "";
-  setMsg(settingsMsg, "");
-  settingsModal.classList.add("open");
-};
-document.getElementById("menu-logout").onclick = async () => {
-  userMenu.classList.remove("open");
-  try { await api("/api/logout", "POST"); } catch (e) { /* session is client-side gone either way */ }
-  setUser(null);
-};
+document.getElementById("menu-profile").onclick = openProfile;
+document.getElementById("menu-logout").onclick = logout;
+document.getElementById("profile-back").onclick = closeProfile;
+document.getElementById("profile-logout-btn").onclick = logout;
 
-document.getElementById("settings-save-btn").onclick = async () => {
-  setMsg(settingsMsg, "Saving\u2026");
+document.getElementById("profile-save-btn").onclick = async () => {
+  setMsg(profileMsg, "Saving\u2026");
   try {
     const user = await api("/api/me", "PUT", {
-      chesscom_username: document.getElementById("settings-chesscom").value.trim(),
-      lichess_username: document.getElementById("settings-lichess").value.trim(),
+      chesscom_username: document.getElementById("profile-chesscom").value.trim(),
+      lichess_username: document.getElementById("profile-lichess").value.trim(),
     });
     setUser(user);
-    setMsg(settingsMsg, "Saved.", "ok");
+    setMsg(profileMsg, "Profile saved.", "ok");
   } catch (e) {
-    setMsg(settingsMsg, e.message, "error");
+    setMsg(profileMsg, e.message, "error");
   }
 };
-document.getElementById("settings-cancel-btn").onclick = () => settingsModal.classList.remove("open");
 
-for (const overlay of [authModal, settingsModal]) {
-  overlay.addEventListener("click", e => {
-    if (e.target === overlay) overlay.classList.remove("open");
-  });
-}
+document.getElementById("profile-analyze-btn").onclick = () => {
+  closeProfile();
+  analyzeMe();
+};
+
+document.getElementById("profile-pw-btn").onclick = async () => {
+  const current_password = document.getElementById("profile-pw-current").value;
+  const new_password = document.getElementById("profile-pw-new").value;
+  setMsg(profilePwMsg, "Updating\u2026");
+  try {
+    await api("/api/me/password", "POST", { current_password, new_password });
+    document.getElementById("profile-pw-current").value = "";
+    document.getElementById("profile-pw-new").value = "";
+    setMsg(profilePwMsg, "Password updated.", "ok");
+  } catch (e) {
+    setMsg(profilePwMsg, e.message, "error");
+  }
+};
+
+authModal.addEventListener("click", e => {
+  if (e.target === authModal) authModal.classList.remove("open");
+});
 
 (async function restoreSession() {
   try {
