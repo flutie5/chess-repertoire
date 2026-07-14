@@ -9,7 +9,7 @@
 # Proxy API calls to Render so the browser sees a single origin (Netlify domain).
 [[redirects]]
   from = "/api/*"
-  to = "https://chess-repertoire-api.onrender.com/api/:splat"
+  to = "https://chess-repertoire-bteo.onrender.com/api/:splat"
   status = 200
   force = true
 
