@@ -39,9 +39,23 @@ IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
 _data_dir = os.environ.get("DATA_DIR", "").strip()
 if _data_dir:
     _data_path = Path(_data_dir)
-    _data_path.mkdir(parents=True, exist_ok=True)
-    CACHE_DIR = _data_path / ".chesscom-cache"
-    DB_PATH = _data_path / "users.db"
+    try:
+        _data_path.mkdir(parents=True, exist_ok=True)
+        # Verify we can actually write here (wrong path or missing disk fails early).
+        probe = _data_path / ".write_probe"
+        probe.write_text("ok")
+        probe.unlink(missing_ok=True)
+        CACHE_DIR = _data_path / ".chesscom-cache"
+        DB_PATH = _data_path / "users.db"
+    except OSError as e:
+        print(
+            f"WARNING: DATA_DIR={_data_dir!r} is not writable ({e}). "
+            f"Falling back to local webapp paths. "
+            f"On Render, set DATA_DIR=/data and attach a disk mounted at /data.",
+            flush=True,
+        )
+        CACHE_DIR = ROOT / ".chesscom-cache"
+        DB_PATH = WEBAPP_DIR / "users.db"
 else:
     CACHE_DIR = ROOT / ".chesscom-cache"
     DB_PATH = WEBAPP_DIR / "users.db"
