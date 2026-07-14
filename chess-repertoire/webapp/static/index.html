@@ -92,7 +92,8 @@
   /* ---- board ---- */
   .board-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   #line-title { font-weight: 700; text-align: center; min-height: 22px; }
-  .board-row { display: flex; gap: 10px; align-items: stretch; width: min(100%, 600px); }
+  .board-panel { --board-scale: 1; }
+  .board-row { display: flex; gap: 10px; align-items: stretch; width: min(100%, calc(600px * var(--board-scale))); }
   #evalbar {
     width: 20px; border-radius: var(--radius-sm); overflow: hidden;
     background: #403d39; position: relative; flex: none;
@@ -166,6 +167,12 @@
   .nav button:hover { background: var(--bg-card-hover); border-color: var(--green); }
   .nav button.active { background: var(--green); color: #fff; border-color: var(--green); }
   .nav button.active:hover { background: var(--green-hover); }
+  #board-size {
+    display: flex; gap: 6px; align-items: center; margin-left: 10px;
+    color: var(--text-secondary, #999); font-size: 12px;
+  }
+  #board-size input[type="range"] { width: 90px; accent-color: var(--green); cursor: pointer; }
+  #board-size .pct { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
   #best-arrow {
     position: absolute; inset: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 3;
@@ -304,6 +311,7 @@
   .line .lname { flex: 1; min-width: 0; color: var(--text-secondary); }
   .line.active .lname { color: var(--text-primary); }
   .line .lgames { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .line .scorebar { width: 48px; height: 6px; align-self: center; }
   .games-head {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 12px 4px 22px; font-size: 12px; font-weight: 700;
@@ -484,6 +492,10 @@
       <button id="nav-end" title="End">&#8250;|</button>
       <button id="nav-reset" title="Reset board">&#8634;</button>
       <button id="best-move-btn" title="Show best move">&#9678;</button>
+      <label id="board-size" title="Board size">
+        <input type="range" id="board-size-slider" min="70" max="130" step="5" value="100">
+        <span class="pct" id="board-size-pct">100%</span>
+      </label>
     </div>
     <div id="engine-panel">
       <div id="engine-head">
@@ -878,6 +890,21 @@ document.getElementById("nav-prev").onclick = () => setPly(state.ply - 1);
 document.getElementById("nav-next").onclick = () => setPly(state.ply + 1);
 document.getElementById("nav-end").onclick = () => setPly(Infinity);
 document.getElementById("nav-reset").onclick = () => resetGame();
+
+const BOARD_SIZE_LS = "boardSizePct";
+const sizeSlider = document.getElementById("board-size-slider");
+const sizePct = document.getElementById("board-size-pct");
+function applyBoardSize(pct) {
+  pct = Math.min(130, Math.max(70, pct));
+  document.querySelector(".board-panel").style.setProperty("--board-scale", pct / 100);
+  sizeSlider.value = pct;
+  sizePct.textContent = pct + "%";
+}
+sizeSlider.addEventListener("input", () => {
+  applyBoardSize(Number(sizeSlider.value));
+  localStorage.setItem(BOARD_SIZE_LS, sizeSlider.value);
+});
+applyBoardSize(Number(localStorage.getItem(BOARD_SIZE_LS)) || 100);
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (e.key === "ArrowLeft") { e.preventDefault(); setPly(state.ply - 1); }
@@ -1002,9 +1029,11 @@ function renderSidebar() {
       const row = document.createElement("div");
       row.className = "line";
       row.dataset.key = op.name + "||" + v.name;
+      const showBar = v.games > 3 && v.score != null;
       row.innerHTML =
         `<span class="lname">${v.name}</span>` +
-        `<span class="lgames">${v.games} game${v.games === 1 ? "" : "s"}</span>`;
+        `<span class="lgames">${v.games} game${v.games === 1 ? "" : "s"}</span>` +
+        (showBar ? `<span class="scorebar" title="${v.score}% score"><i style="width:${v.score}%"></i></span>` : "");
       if (!v.san.length) {
         row.style.opacity = ".5";
         row.title = "No replayable moves found for this line";

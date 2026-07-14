@@ -226,11 +226,17 @@ def _load_lichess_games(username: str, months: int):
     return games
 
 
-def _variation_payload(name: str, count: int, move_lists: list[list[str]]):
+def _variation_payload(name: str, count: int, move_lists: list[list[str]],
+                       results: list[str]):
     line = moves.main_line(move_lists)
     fens = moves.fens_for(line)
     line = line[: len(fens)]  # drop anything that failed legality check
-    return {"name": name, "games": count, "san": line, "fens": fens}
+    score = None
+    if results:
+        pts = results.count("win") + 0.5 * results.count("draw")
+        score = round(100 * pts / len(results), 1)
+    return {"name": name, "games": count, "score": score,
+            "san": line, "fens": fens}
 
 
 MAX_GAMES_PER_OPENING = 200
@@ -256,17 +262,21 @@ def _color_payload(report, games_with_moves):
     """Serialize a ColorReport, attaching main lines to each variation."""
     # variation full name -> list of move lists (for this color's games)
     by_variation: dict[str, list[list[str]]] = {}
+    # variation full name -> list of results ("win"/"loss"/"draw")
+    variation_results: dict[str, list[str]] = {}
     # opening family -> (game, san_moves) pairs played in it (for this color)
     by_family: dict[str, list] = {}
     for g, mv in games_with_moves:
         if g.color == report.color:
             by_variation.setdefault(g.opening_full, []).append(mv)
+            variation_results.setdefault(g.opening_full, []).append(g.result)
             by_family.setdefault(g.opening_family, []).append((g, mv))
 
     openings = []
     for op in report.openings:
         variations = [
-            _variation_payload(vname, vcount, by_variation.get(vname, []))
+            _variation_payload(vname, vcount, by_variation.get(vname, []),
+                               variation_results.get(vname, []))
             for vname, vcount in sorted(op.variations.items(),
                                         key=lambda kv: -kv[1])
         ]
