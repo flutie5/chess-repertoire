@@ -200,9 +200,19 @@ def _get_engine() -> chess.engine.SimpleEngine | None:
     return _engine
 
 
-def _shutdown_engine():
+def _reset_engine():
+    """Drop a dead engine handle so the next call restarts Stockfish."""
+    global _engine
     if _engine is not None:
-        _engine.quit()
+        try:
+            _engine.quit()
+        except Exception:
+            pass
+        _engine = None
+
+
+def _shutdown_engine():
+    _reset_engine()
 
 
 atexit.register(_shutdown_engine)
@@ -330,6 +340,9 @@ def evaluate():
     except ValueError:
         return jsonify({"error": "invalid FEN"}), 400
 
+    if board.king(chess.WHITE) is None or board.king(chess.BLACK) is None:
+        return jsonify({"error": "both kings are required"}), 400
+
     key = board.fen()
     if key in _eval_cache:
         return jsonify(_eval_cache[key])
@@ -338,7 +351,18 @@ def evaluate():
         engine = _get_engine()
         if engine is None:
             return jsonify({"error": "Stockfish engine not found"}), 503
-        info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
+        try:
+            info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
+        except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
+            _reset_engine()
+            engine = _get_engine()
+            if engine is None:
+                return jsonify({"error": "Stockfish engine not found"}), 503
+            try:
+                info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
+            except Exception as exc:
+                _reset_engine()
+                return jsonify({"error": f"engine failed: {exc}"}), 500
 
     score = info["score"].white()
     pv = info.get("pv", [])

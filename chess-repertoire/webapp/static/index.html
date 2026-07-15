@@ -118,6 +118,45 @@
     min-width: 1.6em;
   }
   .material-tray .adv.empty { visibility: hidden; }
+  .piece-bank {
+    display: none; flex-direction: column; gap: 6px;
+    width: calc(var(--board-px) + 30px);
+    padding: 4px 2px;
+  }
+  body.edit-mode .piece-bank { display: flex; }
+  body.edit-mode .material-tray { display: none; }
+  body.edit-mode .edit-tools { display: flex; }
+  .piece-bank .bank-row {
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    flex-wrap: wrap;
+  }
+  .piece-bank .bank-piece {
+    width: calc(var(--board-px) / 10); height: calc(var(--board-px) / 10);
+    max-width: 48px; max-height: 48px; min-width: 32px; min-height: 32px;
+    padding: 2px; border: 1px solid transparent; border-radius: var(--radius-sm);
+    background: transparent; cursor: grab; line-height: 0;
+  }
+  .piece-bank .bank-piece:hover { background: var(--bg-card-hover); }
+  .piece-bank .bank-piece.selected {
+    border-color: var(--green); background: rgba(129, 182, 76, 0.18);
+  }
+  .piece-bank .bank-piece img {
+    width: 100%; height: 100%; pointer-events: none; display: block;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,.4));
+  }
+  .edit-tools {
+    display: none; align-items: center; justify-content: center; gap: 8px;
+    width: calc(var(--board-px) + 30px); flex-wrap: wrap;
+  }
+  .edit-tools button {
+    background: var(--bg-card); color: var(--text-secondary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 5px 12px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .edit-tools button:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+  .edit-tools button.active {
+    background: var(--green); color: #fff; border-color: var(--green);
+  }
   .board-row {
     display: flex; gap: 10px; align-items: stretch;
     width: calc(var(--board-px) + 30px);
@@ -643,6 +682,7 @@
 <main>
   <section class="board-panel">
     <div id="line-title">Analysis board</div>
+    <div class="piece-bank" id="bank-top" aria-label="Piece tray (top)"></div>
     <div class="material-tray" id="material-top" aria-label="Captured material (top)">
       <div class="caps"></div><span class="adv empty"></span>
     </div>
@@ -656,13 +696,21 @@
     <div class="material-tray" id="material-bot" aria-label="Captured material (bottom)">
       <div class="caps"></div><span class="adv empty"></span>
     </div>
+    <div class="piece-bank" id="bank-bot" aria-label="Piece tray (bottom)"></div>
+    <div class="edit-tools" id="edit-tools">
+      <button type="button" id="edit-turn-w" title="White to play">White to play</button>
+      <button type="button" id="edit-turn-b" title="Black to play">Black to play</button>
+      <button type="button" id="edit-clear" title="Clear board">Clear</button>
+    </div>
     <div class="nav">
       <button id="nav-start" title="Start">|&#8249;</button>
       <button id="nav-prev" title="Previous move">&#8249;</button>
       <button id="nav-next" title="Next move">&#8250;</button>
       <button id="nav-end" title="End">&#8250;|</button>
       <button id="nav-reset" title="Reset board">&#8634;</button>
+      <button id="flip-board-btn" title="Flip board">&#8645;</button>
       <button id="best-move-btn" title="Show best move">&#9678;</button>
+      <button id="edit-pos-btn" title="Edit position">&#9998;</button>
     </div>
     <div id="engine-panel">
       <div id="engine-head">
@@ -721,35 +769,49 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const state = {
   report: null,
   range: { preset: "12m", since: null, until: null },  // time-frame filter
-  color: "white",           // which tab is shown
+  color: "white",           // which repertoire tab is shown
+  orientation: "white",     // board perspective (independent of tab)
   ply: 0,                   // 0 = start position
   sans: [],                 // SAN of every move in the current game
   fens: [START_FEN],        // fens[i] = position after i plies
   moves: [],                // verbose chess.js move objects
   moveFlags: [],            // opening blunder/mistake flags for current game
   lastOpeningName: null,    // deepest opening name recognized for current line
+  editMode: false,         // free-place position editor
 };
 
 /* ---------- game model (chess.js) ---------- */
 
 let game = new Chess();     // full played game (may extend past state.ply)
+let gameRootFen = START_FEN; // FEN before any moves in `game`
+let freeFen = null;          // raw FEN when Chess.js rejects (e.g. missing king)
+
+function tryLoadChess(fen) {
+  try { return new Chess(fen); } catch (e) { return null; }
+}
+
+function fenHasBothKings(fen) {
+  const p = (fen || "").split(" ")[0] || "";
+  return p.includes("K") && p.includes("k");
+}
 
 function rebuildDerived() {
   const verbose = game.history({ verbose: true });
   state.moves = verbose;
   state.sans = verbose.map(m => m.san);
-  state.fens = [START_FEN, ...verbose.map(m => m.after)];
+  state.fens = [gameRootFen, ...verbose.map(m => m.after)];
 }
 
 function truncateToPly() {
   // drop moves after the current ply (standard analysis-board behavior)
   const keep = state.moves.slice(0, state.ply);
-  game = new Chess();
+  game = new Chess(gameRootFen);
   for (const m of keep) game.move({ from: m.from, to: m.to, promotion: m.promotion });
   rebuildDerived();
 }
 
 function makeUserMove(from, to, promotion) {
+  if (state.editMode || freeFen) return false;
   if (state.ply < state.sans.length) truncateToPly();
   try {
     game.move({ from, to, promotion });
@@ -760,6 +822,116 @@ function makeUserMove(from, to, promotion) {
   state.ply = state.sans.length;
   refreshBoard();
   return true;
+}
+
+/** Normalize to a playable / evaluable FEN (clear castling/ep for editor roots). */
+function normalizeEditFen(placement, turn) {
+  const t = turn === "b" ? "b" : "w";
+  return `${placement} ${t} - - 0 1`;
+}
+
+function setCustomFen(fen, { keepEdit = true } = {}) {
+  const parts = fen.trim().split(/\s+/);
+  const placement = parts[0];
+  const turn = parts[1] === "b" ? "b" : "w";
+  const normalized = normalizeEditFen(placement, turn);
+  const c = tryLoadChess(normalized);
+  if (c) {
+    freeFen = null;
+    gameRootFen = normalized;
+    game = c;
+    rebuildDerived();
+  } else {
+    freeFen = normalized;
+    gameRootFen = normalized;
+    game = new Chess(); // unused until position becomes legal
+    state.moves = [];
+    state.sans = [];
+    state.fens = [normalized];
+  }
+  state.ply = 0;
+  state.moveFlags = [];
+  state.lastOpeningName = null;
+  if (!keepEdit && state.editMode) setEditMode(false);
+  refreshBoard();
+}
+
+function boardMapFromFen(fen) {
+  const map = {};
+  const rows = fen.split(" ")[0].split("/");
+  rows.forEach((row, r) => {
+    let f = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) f += +ch;
+      else {
+        map["abcdefgh"[f] + (8 - r)] = ch;
+        f++;
+      }
+    }
+  });
+  return map;
+}
+
+function fenFromBoardMap(map, turn) {
+  const ranks = [];
+  for (let r = 8; r >= 1; r--) {
+    let row = "";
+    let empty = 0;
+    for (let f = 0; f < 8; f++) {
+      const sq = "abcdefgh"[f] + r;
+      const pc = map[sq];
+      if (!pc) empty++;
+      else {
+        if (empty) { row += empty; empty = 0; }
+        row += pc;
+      }
+    }
+    if (empty) row += empty;
+    ranks.push(row);
+  }
+  const cur = currentFen().split(/\s+/);
+  return normalizeEditFen(ranks.join("/"), turn || (cur[1] === "b" ? "b" : "w"));
+}
+
+function placePieceOn(sq, piece) {
+  const map = boardMapFromFen(currentFen());
+  // Only one king per side
+  if (piece === "K" || piece === "k") {
+    for (const [s, p] of Object.entries(map)) {
+      if (p === piece) delete map[s];
+    }
+  }
+  map[sq] = piece;
+  setCustomFen(fenFromBoardMap(map));
+}
+
+function removePieceAt(sq) {
+  const map = boardMapFromFen(currentFen());
+  if (!map[sq]) return;
+  delete map[sq];
+  setCustomFen(fenFromBoardMap(map));
+}
+
+function relocatePiece(from, to) {
+  if (from === to) return;
+  const map = boardMapFromFen(currentFen());
+  const pc = map[from];
+  if (!pc) return;
+  delete map[from];
+  map[to] = pc;
+  setCustomFen(fenFromBoardMap(map));
+}
+
+function setSideToMove(turn) {
+  const parts = currentFen().split(/\s+/);
+  setCustomFen(normalizeEditFen(parts[0], turn));
+  updateEditTurnBtns();
+}
+
+function updateEditTurnBtns() {
+  const turn = currentFen().split(/\s+/)[1] || "w";
+  document.getElementById("edit-turn-w").classList.toggle("active", turn === "w");
+  document.getElementById("edit-turn-b").classList.toggle("active", turn === "b");
 }
 
 /* ---------- board rendering ---------- */
@@ -837,6 +1009,7 @@ function diffSquares(fenA, fenB) {
 }
 
 function currentFen() {
+  if (freeFen != null) return freeFen;
   return state.fens[state.ply];
 }
 
@@ -851,16 +1024,12 @@ function materialState(fen) {
     w: { p: 0, n: 0, b: 0, r: 0, q: 0 },
     b: { p: 0, n: 0, b: 0, r: 0, q: 0 },
   };
-  try {
-    const board = new Chess(fen);
-    for (const row of board.board()) {
-      for (const sq of row) {
-        if (!sq || sq.type === "k") continue;
-        on[sq.color][sq.type]++;
-      }
-    }
-  } catch (e) {
-    return { whiteTook: {}, blackTook: {}, diff: 0 };
+  for (const ch of (fen || "").split(" ")[0] || "") {
+    if (ch === "/" || /\d/.test(ch)) continue;
+    const color = ch === ch.toUpperCase() ? "w" : "b";
+    const t = ch.toLowerCase();
+    if (t === "k" || on[color][t] === undefined) continue;
+    on[color][t]++;
   }
 
   function tookFrom(defenderColor) {
@@ -920,7 +1089,7 @@ function renderMaterial() {
   const top = document.getElementById("material-top");
   const bot = document.getElementById("material-bot");
   // Top of board = opponent relative to orientation; show what THAT color has captured
-  if (state.color === "white") {
+  if (state.orientation === "white") {
     // Top = Black sitting, Bottom = White sitting
     renderMaterialTray(top, blackTook, "w", diff < 0 ? -diff : 0);
     renderMaterialTray(bot, whiteTook, "b", diff > 0 ? diff : 0);
@@ -937,10 +1106,11 @@ function refreshBoard() {
     hl = diffSquares(state.fens[state.ply - 1], currentFen());
   }
   clearSelection();
-  renderBoard(currentFen(), state.color, hl);
+  renderBoard(currentFen(), state.orientation, hl);
   markMovablePieces();
   renderMoveList();
   renderMaterial();
+  if (state.editMode) updateEditTurnBtns();
   scheduleOpeningTitle();
   scheduleEval();
 }
@@ -1000,7 +1170,9 @@ function scheduleOpeningTitle() {
   const ply = state.ply;
   if (ply === 0) {
     state.lastOpeningName = null;
-    setBoardTitle("Starting position");
+    if (state.editMode) setBoardTitle("Edit position");
+    else if (gameRootFen !== START_FEN || freeFen) setBoardTitle("Custom position");
+    else setBoardTitle("Starting position");
     return;
   }
   const play = playUciToPly(ply);
@@ -1041,6 +1213,16 @@ function scheduleEval() {
   clearTimeout(evalTimer);
   if (typeof isAnimatingLine === "function" && isAnimatingLine()) return;   // no per-step evals while replaying a line
   const fen = currentFen();
+  if (!fenHasBothKings(fen)) {
+    enginePanel.classList.add("visible");
+    scoreEl.textContent = "—";
+    scoreEl.className = "";
+    labelEl.textContent = "Stockfish — place both kings to evaluate";
+    pvEl.innerHTML = "";
+    clearBestArrow();
+    evalFill.style.height = "50%";
+    return;
+  }
   if (evalCache.has(fen)) { renderEval(evalCache.get(fen)); return; }
   labelEl.textContent = "Stockfish \u2014 thinking\u2026";
   evalTimer = setTimeout(() => fetchEval(fen), 200);
@@ -1080,6 +1262,14 @@ function renderEval(data) {
   scoreEl.className = (data.mate !== null ? data.mate > 0 : data.cp >= 0)
     ? "white-adv" : "black-adv";
   labelEl.textContent = `Stockfish \u2014 depth ${data.depth}`;
+  // White is the light fill; pin it to the bottom when White sits there, otherwise the top
+  if (state.orientation === "white") {
+    evalFill.style.bottom = "0";
+    evalFill.style.top = "auto";
+  } else {
+    evalFill.style.top = "0";
+    evalFill.style.bottom = "auto";
+  }
   evalFill.style.height = (whiteShare * 100).toFixed(1) + "%";
   pvEl.innerHTML = data.best_san
     ? `Best: <b>${data.best_san}</b> &nbsp; ${data.pv_san}`
@@ -1113,6 +1303,78 @@ function setShowBestMove(on) {
 
 bestMoveBtn.classList.toggle("active", showBestMove);
 bestMoveBtn.onclick = () => setShowBestMove(!showBestMove);
+
+/* ---------- edit position mode ---------- */
+
+let palettePiece = null;   // FEN piece char selected for click-to-place
+const editPosBtn = document.getElementById("edit-pos-btn");
+
+function fillPieceBank(el) {
+  el.innerHTML = "";
+  const mkRow = (chars) => {
+    const row = document.createElement("div");
+    row.className = "bank-row";
+    for (const pc of chars) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bank-piece";
+      btn.dataset.piece = pc;
+      btn.title = (pc === pc.toUpperCase() ? "White " : "Black ") +
+        ({ k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" }[pc.toLowerCase()]);
+      const img = document.createElement("img");
+      const isWhite = pc === pc.toUpperCase();
+      img.src = `/pieces/${isWhite ? "w" : "b"}${pc.toLowerCase()}.png`;
+      img.alt = pc;
+      img.draggable = false;
+      btn.appendChild(img);
+      row.appendChild(btn);
+    }
+    return row;
+  };
+  el.appendChild(mkRow(["K", "Q", "R", "B", "N", "P"]));
+  el.appendChild(mkRow(["k", "q", "r", "b", "n", "p"]));
+}
+
+fillPieceBank(document.getElementById("bank-top"));
+fillPieceBank(document.getElementById("bank-bot"));
+
+function syncPaletteSelection() {
+  document.querySelectorAll(".bank-piece").forEach(btn => {
+    btn.classList.toggle("selected", btn.dataset.piece === palettePiece);
+  });
+}
+
+function setPalettePiece(pc) {
+  palettePiece = pc || null;
+  syncPaletteSelection();
+}
+
+function setEditMode(on) {
+  state.editMode = !!on;
+  document.body.classList.toggle("edit-mode", state.editMode);
+  editPosBtn.classList.toggle("active", state.editMode);
+  palettePiece = null;
+  syncPaletteSelection();
+  clearSelection();
+  // Collapse move history into a single custom root so free placement is the new start.
+  setCustomFen(currentFen());
+  if (state.editMode) updateEditTurnBtns();
+}
+
+editPosBtn.onclick = () => setEditMode(!state.editMode);
+document.getElementById("edit-turn-w").onclick = () => setSideToMove("w");
+document.getElementById("edit-turn-b").onclick = () => setSideToMove("b");
+document.getElementById("edit-clear").onclick = () =>
+  setCustomFen(normalizeEditFen("8/8/8/8/8/8/8/8", currentFen().split(/\s+/)[1] || "w"));
+
+document.querySelectorAll(".piece-bank").forEach(bank => {
+  bank.addEventListener("click", e => {
+    if (!state.editMode) return;
+    const btn = e.target.closest(".bank-piece");
+    if (!btn) return;
+    setPalettePiece(btn.dataset.piece);
+  });
+});
 
 function sqToCenter(sq, orientation) {
   const file = sq.charCodeAt(0) - 97;
@@ -1150,8 +1412,8 @@ function clearBestArrow() {
 function drawBestArrow(from, to) {
   const svg = ensureBestArrowLayer();
   svg.replaceChildren();
-  const a = sqToCenter(from, state.color);
-  const b = sqToCenter(to, state.color);
+  const a = sqToCenter(from, state.orientation);
+  const b = sqToCenter(to, state.orientation);
   const dx = b.x - a.x, dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len, uy = dy / len;
@@ -1186,6 +1448,10 @@ const titleEl = document.getElementById("line-title");
 
 function renderMoveList() {
   movesEl.innerHTML = "";
+  if (state.editMode) {
+    movesEl.innerHTML = '<span class="placeholder">Edit mode — drag pieces from the trays onto the board. Drag a piece off the board to remove it.</span>';
+    return;
+  }
   if (!state.sans.length) {
     movesEl.innerHTML = '<span class="placeholder">Move a piece to start analyzing, or pick an opening line on the right.</span>';
     return;
@@ -1229,6 +1495,12 @@ function clearGamesFilters() {
 }
 
 function resetGame(title) {
+  if (state.editMode) {
+    setCustomFen(START_FEN);
+    return;
+  }
+  freeFen = null;
+  gameRootFen = START_FEN;
   game = new Chess();
   rebuildDerived();
   state.ply = 0;
@@ -1243,6 +1515,11 @@ document.getElementById("nav-prev").onclick = () => setPly(state.ply - 1);
 document.getElementById("nav-next").onclick = () => setPly(state.ply + 1);
 document.getElementById("nav-end").onclick = () => setPly(Infinity);
 document.getElementById("nav-reset").onclick = () => resetGame();
+
+document.getElementById("flip-board-btn").onclick = () => {
+  state.orientation = state.orientation === "white" ? "black" : "white";
+  refreshBoard();
+};
 
 const BOARD_PX_LS = "boardPx";
 const BOARD_PX_MIN = 320;
@@ -1332,6 +1609,9 @@ document.addEventListener("keydown", e => {
 
 function loadLine(line, openingName) {
   // Seed the analyzer game with the line's moves; user can take over anywhere.
+  if (state.editMode) setEditMode(false);
+  freeFen = null;
+  gameRootFen = START_FEN;
   const g = new Chess();
   for (const san of line.san) {
     try { g.move(san); }
@@ -1356,6 +1636,9 @@ function loadLine(line, openingName) {
 
 function loadGameReplay(g) {
   // Load the full game into the analyzer; preview only the first 5 moves.
+  if (state.editMode) setEditMode(false);
+  freeFen = null;
+  gameRootFen = START_FEN;
   const gm = new Chess();
   for (const san of g.san) {
     try { gm.move(san); }
@@ -1655,6 +1938,7 @@ function appendGamesSection(lines, op) {
 
 function setColor(color) {
   state.color = color;
+  state.orientation = color;  // match board perspective to the side you're studying
   document.getElementById("tab-white").classList.toggle("active", color === "white");
   document.getElementById("tab-black").classList.toggle("active", color === "black");
   renderSidebar();
@@ -1985,7 +2269,7 @@ let legalDests = new Map();   // dest square -> verbose move (for current select
 
 function positionAtPly() {
   // chess.js instance for the position currently shown on the board
-  return new Chess(currentFen());
+  return tryLoadChess(currentFen());
 }
 
 function clearSelection() {
@@ -1997,8 +2281,14 @@ function clearSelection() {
 }
 
 function markMovablePieces() {
+  if (state.editMode) {
+    for (const sq of boardEl.querySelectorAll(".sq")) {
+      if (sq.querySelector("img.piece")) sq.classList.add("movable");
+    }
+    return;
+  }
   const pos = positionAtPly();
-  if (pos.isGameOver()) return;
+  if (!pos || pos.isGameOver()) return;
   const turn = pos.turn();
   for (const sq of boardEl.querySelectorAll(".sq")) {
     const pc = pos.get(sq.dataset.square);
@@ -2008,7 +2298,14 @@ function markMovablePieces() {
 
 function selectSquare(sqName) {
   clearSelection();
+  if (state.editMode) {
+    selected = sqName;
+    const selEl = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
+    if (selEl) selEl.classList.add("sel");
+    return true;
+  }
   const pos = positionAtPly();
+  if (!pos) return false;
   const moves = pos.moves({ square: sqName, verbose: true });
   if (!moves.length) return false;
   selected = sqName;
@@ -2025,6 +2322,11 @@ function selectSquare(sqName) {
 }
 
 function tryMove(from, to) {
+  if (state.editMode) {
+    relocatePiece(from, to);
+    clearSelection();
+    return true;
+  }
   const m = legalDests.get(to);
   if (!m) return false;
   if (m.promotion) { showPromoPicker(from, to); return true; }
@@ -2041,6 +2343,7 @@ function hidePromoPicker() {
 function showPromoPicker(from, to) {
   hidePromoPicker();
   const pos = positionAtPly();
+  if (!pos) { makeUserMove(from, to, "q"); return; }
   const color = pos.turn() === "w" ? "w" : "b";
   const destEl = boardEl.querySelector(`.sq[data-square="${to}"]`);
   if (!destEl) { makeUserMove(from, to, "q"); return; }
@@ -2073,12 +2376,36 @@ function showPromoPicker(from, to) {
 
 /* click-to-move */
 let justSelected = false;   // pointerdown selected this piece; don't deselect on the click
+let suppressBoardClick = false;
 
 boardEl.addEventListener("click", e => {
+  if (suppressBoardClick) { suppressBoardClick = false; return; }
   const sq = e.target.closest(".sq");
   if (!sq || !boardEl.contains(sq)) return;
   if (promoEl) { hidePromoPicker(); clearSelection(); return; }
   const name = sq.dataset.square;
+
+  if (state.editMode) {
+    if (palettePiece) {
+      placePieceOn(name, palettePiece);
+      return;
+    }
+    if (selected) {
+      if (name === selected) {
+        if (justSelected) { justSelected = false; return; }
+        clearSelection();
+        return;
+      }
+      justSelected = false;
+      const map = boardMapFromFen(currentFen());
+      if (map[selected]) relocatePiece(selected, name);
+      clearSelection();
+      return;
+    }
+    if (boardMapFromFen(currentFen())[name]) selectSquare(name);
+    return;
+  }
+
   if (selected) {
     if (name === selected) {
       if (justSelected) { justSelected = false; return; }
@@ -2095,10 +2422,44 @@ boardEl.addEventListener("click", e => {
 });
 
 /* drag-and-drop via pointer events */
-let drag = null;   // { from, ghost, img, moved }
+let drag = null;   // { from, ghost, img, moved, piece, fromPalette }
+
+function makeGhostFromImg(img, clientX, clientY) {
+  const rect = img.getBoundingClientRect();
+  const ghost = img.cloneNode(true);
+  ghost.id = "drag-ghost";
+  ghost.style.width = Math.max(rect.width, 36) * 0.92 + "px";
+  ghost.style.height = Math.max(rect.height, 36) * 0.92 + "px";
+  document.body.appendChild(ghost);
+  ghost.style.left = clientX - ghost.offsetWidth / 2 + "px";
+  ghost.style.top = clientY - ghost.offsetHeight / 2 + "px";
+  return ghost;
+}
 
 boardEl.addEventListener("pointerdown", e => {
   if (e.button !== 0 || promoEl) return;
+
+  if (state.editMode) {
+    const sq = e.target.closest(".sq");
+    if (!sq || !boardEl.contains(sq)) return;
+    const img = sq.querySelector("img.piece");
+    if (!img) return;
+    const wasSelected = selected === sq.dataset.square;
+    selectSquare(sq.dataset.square);
+    justSelected = !wasSelected;
+    const ghost = makeGhostFromImg(img, e.clientX, e.clientY);
+    drag = {
+      from: sq.dataset.square,
+      ghost,
+      img,
+      moved: false,
+      piece: img.alt,
+      fromPalette: false,
+    };
+    e.preventDefault();
+    return;
+  }
+
   const sq = e.target.closest(".sq");
   if (!sq || !sq.classList.contains("movable")) return;
   const img = sq.querySelector("img.piece");
@@ -2107,15 +2468,30 @@ boardEl.addEventListener("pointerdown", e => {
   if (!selectSquare(sq.dataset.square)) return;
   justSelected = !wasSelected;
 
-  const rect = sq.getBoundingClientRect();
-  const ghost = img.cloneNode(true);
-  ghost.id = "drag-ghost";
-  ghost.style.width = rect.width * 0.92 + "px";
-  ghost.style.height = rect.height * 0.92 + "px";
-  document.body.appendChild(ghost);
-  drag = { from: sq.dataset.square, ghost, img, moved: false };
-  moveGhost(e);
+  const ghost = makeGhostFromImg(img, e.clientX, e.clientY);
+  drag = { from: sq.dataset.square, ghost, img, moved: false, fromPalette: false };
   e.preventDefault();
+});
+
+document.querySelectorAll(".piece-bank").forEach(bank => {
+  bank.addEventListener("pointerdown", e => {
+    if (!state.editMode || e.button !== 0) return;
+    const btn = e.target.closest(".bank-piece");
+    if (!btn) return;
+    const img = btn.querySelector("img");
+    if (!img) return;
+    setPalettePiece(btn.dataset.piece);
+    const ghost = makeGhostFromImg(img, e.clientX, e.clientY);
+    drag = {
+      from: null,
+      ghost,
+      img: null,
+      moved: false,
+      piece: btn.dataset.piece,
+      fromPalette: true,
+    };
+    e.preventDefault();
+  });
 });
 
 function moveGhost(e) {
@@ -2127,30 +2503,52 @@ document.addEventListener("pointermove", e => {
   if (!drag) return;
   if (!drag.moved) {
     drag.moved = true;
-    drag.img.classList.add("dragging");
+    if (drag.img) drag.img.classList.add("dragging");
   }
   moveGhost(e);
 });
 
 document.addEventListener("pointerup", e => {
   if (!drag) return;
-  const { from, ghost, img, moved } = drag;
+  const { from, ghost, img, moved, piece, fromPalette } = drag;
   drag = null;
   ghost.remove();
-  img.classList.remove("dragging");
+  if (img) img.classList.remove("dragging");
+
+  if (state.editMode) {
+    if (!moved && !fromPalette) return; // plain click: click handler manages selection
+    if (moved) suppressBoardClick = true;
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    const sq = target && target.closest(".sq");
+    const onBoard = sq && boardEl.contains(sq);
+    if (fromPalette) {
+      if (onBoard) placePieceOn(sq.dataset.square, piece);
+      return;
+    }
+    if (onBoard) {
+      if (sq.dataset.square !== from) relocatePiece(from, sq.dataset.square);
+      clearSelection();
+    } else {
+      // Dragged off the board — remove the piece
+      removePieceAt(from);
+      clearSelection();
+    }
+    return;
+  }
+
   if (!moved) return;   // plain click: let the click handler manage selection
+  suppressBoardClick = true;
   const target = document.elementFromPoint(e.clientX, e.clientY);
   const sq = target && target.closest(".sq");
   if (sq && boardEl.contains(sq) && sq.dataset.square !== from) {
     if (!tryMove(from, sq.dataset.square)) clearSelection();
   }
-  // dropped on the source square or a non-destination: keep selection for click-click
 });
 
 document.addEventListener("pointercancel", () => {
   if (!drag) return;
   drag.ghost.remove();
-  drag.img.classList.remove("dragging");
+  if (drag.img) drag.img.classList.remove("dragging");
   drag = null;
 });
 
@@ -2158,6 +2556,7 @@ document.addEventListener("pointercancel", () => {
 
 rebuildDerived();
 refreshBoard();
+updateEditTurnBtns();
 </script>
 </body>
 </html>
