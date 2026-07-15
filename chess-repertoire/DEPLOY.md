@@ -54,11 +54,15 @@ Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 ## 3. Deploy the frontend on Netlify
 
 1. Netlify Dashboard → **Add new site** → **Import an existing project**
-2. Connect the same Git repo
-3. Build settings (auto-detected from `netlify.toml`):
-   - **Publish directory:** `webapp/static`
+2. Connect the same Git repo (`flutie5/chess-repertoire`)
+3. Build settings — leave Base directory **empty** (repo root). A root
+   `netlify.toml` publishes `chess-repertoire/webapp/static` automatically.
+   - **Publish directory:** `chess-repertoire/webapp/static`
    - **Build command:** leave empty (static site)
 4. Deploy
+
+If you prefer a Base directory of `chess-repertoire` instead, set that in the
+UI and use publish directory `webapp/static` (see nested `chess-repertoire/netlify.toml`).
 
 ## 4. Wire the API proxy
 

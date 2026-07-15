@@ -1,5 +1,9 @@
 # Netlify — static frontend + API proxy (same-origin cookies for auth)
 #
+# NOTE: The GitHub repo root is one level above this folder. Netlify must either:
+#   - use the repo-root netlify.toml (publish = "chess-repertoire/webapp/static"), OR
+#   - set Base directory = "chess-repertoire" in the Netlify UI (then this file applies).
+#
 # Replace BACKEND_URL below with your Render service URL after creating the web service.
 # Example: https://chess-repertoire-api.onrender.com
 
