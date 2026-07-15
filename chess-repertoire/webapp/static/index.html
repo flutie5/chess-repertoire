@@ -1972,6 +1972,11 @@ async function readJson(resp) {
   try {
     return JSON.parse(text);
   } catch (e) {
+    if (resp.status === 405) {
+      throw new Error(
+        "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again."
+      );
+    }
     throw new Error(
       `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`
     );
@@ -1993,7 +1998,6 @@ async function runReport(startPath, fetchingMsg) {
   try {
     const qs = `&time_classes=${tcs.join(",")}${rangeQuery()}`;
     const startResp = await fetch(`${startPath}${qs}`, {
-      method: "POST",
       credentials: "same-origin",
     });
     const start = await readJson(startResp);

@@ -653,7 +653,7 @@ def _make_me_report(user, months: int, time_classes, since_ts, until_ts):
     return payload
 
 
-@app.post("/api/report/jobs")
+@app.route("/api/report/jobs", methods=["GET", "POST"])
 def start_report_job():
     username = (request.args.get("username") or "").strip()
     if not username:
@@ -676,7 +676,7 @@ def start_report_job():
     return jsonify({"job_id": job_id, "status": "pending"})
 
 
-@app.post("/api/report/me/jobs")
+@app.route("/api/report/me/jobs", methods=["GET", "POST"])
 def start_report_me_job():
     user = _current_user()
     if user is None:
