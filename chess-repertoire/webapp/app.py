@@ -27,6 +27,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -561,6 +562,157 @@ def _build_report(games_with_moves, username_label: str, months: int,
             for p in priorities
         ],
     }
+
+
+# ---- async report jobs (Netlify proxy times out ~26s; chess.com fetch can take longer) ----
+
+_report_jobs: dict[str, dict] = {}
+_report_jobs_lock = threading.Lock()
+_REPORT_JOB_TTL = 3600
+
+
+def _prune_report_jobs() -> None:
+    cutoff = time.time() - _REPORT_JOB_TTL
+    with _report_jobs_lock:
+        for jid in [k for k, j in _report_jobs.items() if j.get("created", 0) < cutoff]:
+            del _report_jobs[jid]
+
+
+def _start_report_job(worker) -> str:
+    _prune_report_jobs()
+    job_id = secrets.token_urlsafe(16)
+    with _report_jobs_lock:
+        _report_jobs[job_id] = {"status": "pending", "created": time.time()}
+
+    def run() -> None:
+        try:
+            with _report_jobs_lock:
+                if job_id in _report_jobs:
+                    _report_jobs[job_id]["status"] = "running"
+            result = worker()
+            with _report_jobs_lock:
+                if job_id in _report_jobs:
+                    _report_jobs[job_id]["status"] = "done"
+                    _report_jobs[job_id]["result"] = result
+        except Exception as e:
+            with _report_jobs_lock:
+                if job_id in _report_jobs:
+                    _report_jobs[job_id]["status"] = "error"
+                    _report_jobs[job_id]["error"] = str(e)
+
+    threading.Thread(target=run, daemon=True).start()
+    return job_id
+
+
+def _fetch_games_for_report(username: str, source: str, months: int):
+    games_with_moves = []
+    if source in ("chesscom", "both"):
+        games_with_moves.extend(_load_games(username, months))
+    if source in ("lichess", "both"):
+        games_with_moves.extend(_load_lichess_games(username, months))
+    return games_with_moves
+
+
+def _make_username_report(username: str, source: str, months: int,
+                          time_classes, since_ts, until_ts):
+    games_with_moves = _fetch_games_for_report(username, source, months)
+    sources = ["chesscom", "lichess"] if source == "both" else [source]
+    return _build_report(games_with_moves, username, months, time_classes,
+                         sources, since_ts=since_ts, until_ts=until_ts)
+
+
+def _make_me_report(user, months: int, time_classes, since_ts, until_ts):
+    cc_name = user["chesscom_username"]
+    li_name = user["lichess_username"]
+    games_with_moves = []
+    sources = []
+    errors = []
+    if cc_name:
+        try:
+            games_with_moves.extend(_load_games(cc_name, months))
+            sources.append("chesscom")
+        except fetch.ChessComError as e:
+            errors.append(f"chess.com: {e}")
+    if li_name:
+        try:
+            games_with_moves.extend(_load_lichess_games(li_name, months))
+            sources.append("lichess")
+        except lichess.LichessError as e:
+            errors.append(f"lichess: {e}")
+
+    if not games_with_moves:
+        msg = "; ".join(errors) if errors else "No games found for your linked accounts."
+        raise ValueError(msg)
+
+    label_parts = [p for p in (cc_name, li_name) if p]
+    label = label_parts[0] if len(set(label_parts)) == 1 else " + ".join(label_parts)
+    payload = _build_report(games_with_moves, label, months, time_classes,
+                          sources, since_ts=since_ts, until_ts=until_ts)
+    if errors:
+        payload["warnings"] = errors
+    return payload
+
+
+@app.post("/api/report/jobs")
+def start_report_job():
+    username = (request.args.get("username") or "").strip()
+    if not username:
+        return jsonify({"error": "username is required"}), 400
+
+    source = (request.args.get("source") or "chesscom").strip().lower()
+    if source not in VALID_SOURCES:
+        return jsonify({"error": "source must be chesscom, lichess or both"}), 400
+
+    try:
+        months, time_classes, since_ts, until_ts = _parse_report_args()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    job_id = _start_report_job(
+        lambda: _make_username_report(
+            username, source, months, time_classes, since_ts, until_ts
+        )
+    )
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+
+@app.post("/api/report/me/jobs")
+def start_report_me_job():
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "not logged in"}), 401
+
+    cc_name = user["chesscom_username"]
+    li_name = user["lichess_username"]
+    if not cc_name and not li_name:
+        return jsonify({
+            "error": "No linked accounts. Add your chess.com or lichess "
+                     "username in account settings first."
+        }), 400
+
+    try:
+        months, time_classes, since_ts, until_ts = _parse_report_args()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    job_id = _start_report_job(
+        lambda: _make_me_report(user, months, time_classes, since_ts, until_ts)
+    )
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+
+@app.get("/api/report/jobs/<job_id>")
+def poll_report_job(job_id: str):
+    with _report_jobs_lock:
+        job = _report_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "job not found or expired"}), 404
+    status = job["status"]
+    if status == "done":
+        return jsonify({"status": "done", "report": job["result"]})
+    if status == "error":
+        return jsonify({"status": "error", "error": job.get("error", "unknown")})
+    return jsonify({"status": status})
 
 
 @app.get("/api/report")

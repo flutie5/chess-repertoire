@@ -1958,6 +1958,11 @@ let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" r
 async function readJson(resp) {
   const text = await resp.text();
   if (!text) {
+    if (resp.status === 504) {
+      throw new Error(
+        "Gateway timed out before the server responded. Wait a moment and try again."
+      );
+    }
     throw new Error(
       resp.status
         ? `Empty response (HTTP ${resp.status}). The API may still be waking up — try again.`
@@ -1973,7 +1978,11 @@ async function readJson(resp) {
   }
 }
 
-async function runReport(url, fetchingMsg) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runReport(startPath, fetchingMsg) {
   const tcs = [...document.querySelectorAll("#tc-group input:checked")].map(c => c.value);
   if (!tcs.length) { statusEl.textContent = "Pick at least one time control."; statusEl.className = "error"; return; }
 
@@ -1982,16 +1991,48 @@ async function runReport(url, fetchingMsg) {
   statusEl.className = "";
   statusEl.textContent = fetchingMsg;
   try {
-    const resp = await fetch(`${url}&time_classes=${tcs.join(",")}${rangeQuery()}`);
-    const data = await readJson(resp);
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    state.report = data;
-    let msg = `${data.analyzed_games} rated games analyzed (${
-      data.since || data.until ? rangeLabel.textContent : `last ${data.months} months`})`;
-    if (data.warnings && data.warnings.length) msg += ` \u2014 ${data.warnings.join("; ")}`;
-    statusEl.textContent = msg;
-    if (data.warnings && data.warnings.length) statusEl.className = "error";
-    setColor(state.color);
+    const qs = `&time_classes=${tcs.join(",")}${rangeQuery()}`;
+    const startResp = await fetch(`${startPath}${qs}`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    const start = await readJson(startResp);
+    if (!startResp.ok) throw new Error(start.error || `HTTP ${startResp.status}`);
+
+    const jobId = start.job_id;
+    const deadline = Date.now() + 5 * 60 * 1000;
+    let dots = 0;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      const pollResp = await fetch(`/api/report/jobs/${encodeURIComponent(jobId)}`, {
+        credentials: "same-origin",
+      });
+      const data = await readJson(pollResp);
+      if (!pollResp.ok) throw new Error(data.error || `HTTP ${pollResp.status}`);
+
+      if (data.status === "pending" || data.status === "running") {
+        dots = (dots + 1) % 4;
+        statusEl.textContent = fetchingMsg.replace(/\u2026.*$/, "") +
+          "\u2026 fetching" + ".".repeat(dots);
+        continue;
+      }
+      if (data.status === "error") throw new Error(data.error || "Analysis failed");
+      if (data.status !== "done") throw new Error(`Unexpected job status: ${data.status}`);
+
+      state.report = data.report;
+      let msg = `${data.report.analyzed_games} rated games analyzed (${
+        data.report.since || data.report.until
+          ? rangeLabel.textContent
+          : `last ${data.report.months} months`})`;
+      if (data.report.warnings && data.report.warnings.length) {
+        msg += ` \u2014 ${data.report.warnings.join("; ")}`;
+      }
+      statusEl.textContent = msg;
+      if (data.report.warnings && data.report.warnings.length) statusEl.className = "error";
+      setColor(state.color);
+      return;
+    }
+    throw new Error("Analysis timed out after 5 minutes. Try a shorter date range.");
   } catch (e) {
     statusEl.textContent = e.message;
     statusEl.className = "error";
@@ -2006,16 +2047,16 @@ async function analyzeUser() {
   if (!username) { statusEl.textContent = "Enter a username first."; statusEl.className = "error"; return; }
   lastAnalyze = analyzeUser;
   await runReport(
-    `/api/report?username=${encodeURIComponent(username)}`,
-    "Fetching games from chess.com\u2026 (first run can take ~20s)"
+    `/api/report/jobs?username=${encodeURIComponent(username)}`,
+    "Fetching games from chess.com\u2026 (first run can take up to a minute)"
   );
 }
 
 async function analyzeMe() {
   lastAnalyze = analyzeMe;
   await runReport(
-    "/api/report/me?1=1",
-    "Fetching games from your linked accounts\u2026 (first run can take ~20s)"
+    "/api/report/me/jobs?1=1",
+    "Fetching games from your linked accounts\u2026 (first run can take up to a minute)"
   );
 }
 
