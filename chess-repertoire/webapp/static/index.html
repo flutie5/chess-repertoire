@@ -98,6 +98,26 @@
     display: flex; flex-direction: column; align-items: center; gap: 12px;
   }
   #line-title { font-weight: 700; text-align: center; min-height: 22px; }
+  .material-tray {
+    display: flex; align-items: center; gap: 2px;
+    width: calc(var(--board-px) + 30px); min-height: 22px;
+    padding: 0 2px;
+  }
+  .material-tray .caps {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0;
+    flex: 1; min-height: 20px;
+  }
+  .material-tray .caps img {
+    width: 18px; height: 18px; margin-left: -5px;
+    filter: drop-shadow(0 0 1px rgba(0,0,0,.55));
+  }
+  .material-tray .caps img:first-child { margin-left: 0; }
+  .material-tray .adv {
+    font-size: 13px; font-weight: 700; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; margin-left: 6px; flex: none;
+    min-width: 1.6em;
+  }
+  .material-tray .adv.empty { visibility: hidden; }
   .board-row {
     display: flex; gap: 10px; align-items: stretch;
     width: calc(var(--board-px) + 30px);
@@ -582,12 +602,18 @@
 <main>
   <section class="board-panel">
     <div id="line-title">Analysis board</div>
+    <div class="material-tray" id="material-top" aria-label="Captured material (top)">
+      <div class="caps"></div><span class="adv empty"></span>
+    </div>
     <div class="board-row">
       <div id="evalbar"><div class="tick"></div><div class="white-fill"></div></div>
       <div class="board-frame">
         <div id="board"></div>
         <div id="board-resize" title="Drag to resize board"></div>
       </div>
+    </div>
+    <div class="material-tray" id="material-bot" aria-label="Captured material (bottom)">
+      <div class="caps"></div><span class="adv empty"></span>
     </div>
     <div class="nav">
       <button id="nav-start" title="Start">|&#8249;</button>
@@ -771,6 +797,97 @@ function currentFen() {
   return state.fens[state.ply];
 }
 
+/* ---------- material / captured pieces (chess.com-style) ---------- */
+
+const PIECE_START = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+const PIECE_ORDER = ["q", "r", "b", "n", "p"];  // chess.com order: high → low value
+
+function materialState(fen) {
+  const on = {
+    w: { p: 0, n: 0, b: 0, r: 0, q: 0 },
+    b: { p: 0, n: 0, b: 0, r: 0, q: 0 },
+  };
+  try {
+    const board = new Chess(fen);
+    for (const row of board.board()) {
+      for (const sq of row) {
+        if (!sq || sq.type === "k") continue;
+        on[sq.color][sq.type]++;
+      }
+    }
+  } catch (e) {
+    return { whiteTook: {}, blackTook: {}, diff: 0 };
+  }
+
+  function tookFrom(defenderColor) {
+    const def = on[defenderColor];
+    let extras = 0;
+    for (const t of ["q", "r", "b", "n"]) {
+      extras += Math.max(0, def[t] - PIECE_START[t]);
+    }
+    const took = {};
+    for (const t of PIECE_ORDER) {
+      if (t === "p") {
+        took.p = Math.max(0, PIECE_START.p - def.p - extras);
+      } else {
+        took[t] = Math.max(0, PIECE_START[t] - def[t]);
+      }
+    }
+    return took;
+  }
+
+  // Pieces white captured = missing black pieces (and vice versa)
+  const whiteTook = tookFrom("b");
+  const blackTook = tookFrom("w");
+
+  let whiteVal = 0, blackVal = 0;
+  for (const t of PIECE_ORDER) {
+    whiteVal += on.w[t] * PIECE_VALUE[t];
+    blackVal += on.b[t] * PIECE_VALUE[t];
+  }
+  return { whiteTook, blackTook, diff: whiteVal - blackVal };
+}
+
+function renderMaterialTray(el, took, pieceColorPrefix, advantageForThisSide) {
+  const caps = el.querySelector(".caps");
+  const adv = el.querySelector(".adv");
+  caps.innerHTML = "";
+  for (const t of PIECE_ORDER) {
+    const n = took[t] || 0;
+    for (let i = 0; i < n; i++) {
+      const img = document.createElement("img");
+      img.src = `/pieces/${pieceColorPrefix}${t}.png`;
+      img.alt = t;
+      img.draggable = false;
+      caps.appendChild(img);
+    }
+  }
+  if (advantageForThisSide > 0) {
+    adv.textContent = "+" + advantageForThisSide;
+    adv.classList.remove("empty");
+  } else {
+    adv.textContent = "";
+    adv.classList.add("empty");
+  }
+}
+
+function renderMaterial() {
+  const { whiteTook, blackTook, diff } = materialState(currentFen());
+  const top = document.getElementById("material-top");
+  const bot = document.getElementById("material-bot");
+  // Top of board = opponent relative to orientation; show what THAT color has captured
+  if (state.color === "white") {
+    // Top = Black sitting, Bottom = White sitting
+    renderMaterialTray(top, blackTook, "w", diff < 0 ? -diff : 0);
+    renderMaterialTray(bot, whiteTook, "b", diff > 0 ? diff : 0);
+  } else {
+    // Top = White sitting, Bottom = Black sitting
+    renderMaterialTray(top, whiteTook, "b", diff > 0 ? diff : 0);
+    renderMaterialTray(bot, blackTook, "w", diff < 0 ? -diff : 0);
+  }
+}
+
 function refreshBoard() {
   let hl = null;
   if (state.ply > 0) {
@@ -780,6 +897,7 @@ function refreshBoard() {
   renderBoard(currentFen(), state.color, hl);
   markMovablePieces();
   renderMoveList();
+  renderMaterial();
   scheduleEval();
 }
 
