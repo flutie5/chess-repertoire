@@ -241,6 +241,9 @@
   #line-moves .mv { padding: 1px 6px; border-radius: 4px; cursor: pointer; }
   #line-moves .mv:hover { background: var(--bg-card-hover); }
   #line-moves .mv.cur { background: var(--green); color: #fff; }
+  #line-moves .mv.bad-blunder { background: rgba(230, 159, 0, .35); }
+  #line-moves .mv.bad-mistake { background: rgba(241, 196, 15, .3); }
+  #line-moves .mv.bad-inaccuracy { background: rgba(86, 180, 233, .3); }
   #line-moves .placeholder { color: var(--text-muted); }
 
   /* ---- sidebar ---- */
@@ -383,6 +386,44 @@
   .rbadge.win { background: var(--green); }
   .rbadge.loss { background: var(--loss-red); }
   .rbadge.draw { background: var(--draw-gray); }
+  .qbadge {
+    flex: none; width: 16px; height: 16px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 800; color: #1a1a1a; line-height: 1;
+  }
+  .qbadge.blunder { background: #e69f00; }      /* chess.com-ish amber/orange */
+  .qbadge.mistake { background: #f1c40f; }
+  .qbadge.inaccuracy { background: #56b4e9; }
+  .scan-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px 4px; border-top: 1px solid var(--border-subtle);
+  }
+  .scan-row button {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 5px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .scan-row button:hover { border-color: var(--green); }
+  .scan-row button:disabled { opacity: .5; cursor: default; }
+  .scan-row .scan-status { font-size: 12px; color: var(--text-muted); }
+  .patterns {
+    display: none; padding: 4px 12px 10px; border-top: 1px solid var(--border-subtle);
+  }
+  .patterns.visible { display: block; }
+  .patterns h4 {
+    margin: 6px 0 8px; font-size: 11px; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--text-muted); font-weight: 700;
+  }
+  .pattern {
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px;
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .pattern .ptop {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 4px; color: var(--text-primary); font-weight: 600;
+  }
+  .pattern .hint { color: var(--text-muted); font-size: 11px; }
   .game-row .gopp {
     flex: 1; min-width: 0; color: var(--text-secondary);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -685,6 +726,7 @@ const state = {
   sans: [],                 // SAN of every move in the current game
   fens: [START_FEN],        // fens[i] = position after i plies
   moves: [],                // verbose chess.js move objects
+  moveFlags: [],            // opening blunder/mistake flags for current game
 };
 
 /* ---------- game model (chess.js) ---------- */
@@ -1068,6 +1110,10 @@ function renderMoveList() {
     movesEl.innerHTML = '<span class="placeholder">Move a piece to start analyzing, or pick an opening line on the right.</span>';
     return;
   }
+  const badByPly = new Map();
+  for (const f of (state.moveFlags || [])) {
+    badByPly.set(f.ply, f);
+  }
   state.sans.forEach((mv, i) => {
     if (i % 2 === 0) {
       const num = document.createElement("span");
@@ -1075,10 +1121,17 @@ function renderMoveList() {
       num.textContent = (i / 2 + 1) + ".";
       movesEl.appendChild(num);
     }
+    const ply = i + 1;
+    const flag = badByPly.get(ply);
     const el = document.createElement("span");
-    el.className = "mv" + (state.ply === i + 1 ? " cur" : "");
+    el.className = "mv" + (state.ply === ply ? " cur" : "") +
+      (flag ? " bad-" + flag.severity : "");
     el.textContent = mv;
-    el.onclick = () => { state.ply = i + 1; refreshBoard(); };
+    if (flag) {
+      el.title = `${flag.severity}: lost ${(flag.loss_cp / 100).toFixed(1)}` +
+        (flag.best_san ? ` (better: ${flag.best_san})` : "");
+    }
+    el.onclick = () => { state.ply = ply; refreshBoard(); };
     movesEl.appendChild(el);
   });
 }
@@ -1099,6 +1152,7 @@ function resetGame(title) {
   game = new Chess();
   rebuildDerived();
   state.ply = 0;
+  state.moveFlags = [];
   titleEl.textContent = title || "Analysis board";
   clearGamesFilters();
   refreshBoard();
@@ -1205,6 +1259,7 @@ function loadLine(line, openingName) {
   game = g;
   rebuildDerived();
   state.ply = 0;
+  state.moveFlags = [];
   titleEl.textContent = line.name;
   clearGamesFilters();
   const el = document.querySelector(`.line[data-key="${CSS.escape(openingName + "||" + line.name)}"]`);
@@ -1226,6 +1281,7 @@ function loadGameReplay(g) {
   game = gm;
   rebuildDerived();
   state.ply = 0;
+  state.moveFlags = g._flags || [];
   const rating = g.opponent_rating ? ` (${g.opponent_rating})` : "";
   titleEl.textContent = g.opponent + rating + (g.date ? " \u2014 " + g.date : "");
   // Keep any variation filter/highlight: the user is browsing that list.
@@ -1341,13 +1397,47 @@ function makeGameRow(g) {
   date.className = "gdate";
   date.textContent = g.date || "";
 
-  row.append(badge, opp, date);
+  row.append(badge, opp);
+
+  // Opening quality flag from blunder scan (if any).
+  if (g._worst) {
+    const q = document.createElement("span");
+    q.className = "qbadge " + g._worst;
+    q.textContent = g._worst === "blunder" ? "??" : g._worst === "mistake" ? "?" : "?!";
+    const parts = [];
+    if (g._counts) {
+      if (g._counts.blunder) parts.push(g._counts.blunder + " blunder" + (g._counts.blunder > 1 ? "s" : ""));
+      if (g._counts.mistake) parts.push(g._counts.mistake + " mistake" + (g._counts.mistake > 1 ? "s" : ""));
+      if (g._counts.inaccuracy) parts.push(g._counts.inaccuracy + " inaccuracy" + (g._counts.inaccuracy > 1 ? "s" : ""));
+    }
+    if (g._flags && g._flags.length) {
+      parts.push(g._flags.map(f => `${f.san} (${f.severity}, -${(f.loss_cp / 100).toFixed(1)})`).join("; "));
+    }
+    q.title = "Opening issues: " + (parts.join(" · ") || g._worst);
+    row.appendChild(q);
+  }
+
+  row.appendChild(date);
   return row;
 }
 
 function appendGamesSection(lines, op) {
   const gl = op.game_list || [];
   if (!gl.length) return;
+
+  const scanRow = document.createElement("div");
+  scanRow.className = "scan-row";
+  const scanBtn = document.createElement("button");
+  scanBtn.type = "button";
+  scanBtn.textContent = "Scan opening for blunders";
+  const scanStatus = document.createElement("span");
+  scanStatus.className = "scan-status";
+  scanRow.append(scanBtn, scanStatus);
+  lines.appendChild(scanRow);
+
+  const patternsEl = document.createElement("div");
+  patternsEl.className = "patterns";
+  lines.appendChild(patternsEl);
 
   const head = document.createElement("div");
   head.className = "games-head";
@@ -1357,15 +1447,51 @@ function appendGamesSection(lines, op) {
   rows.className = "game-rows";
   lines.appendChild(rows);
 
+  let activeFilter = null;
+
+  function renderPatterns(patterns) {
+    patternsEl.innerHTML = "";
+    if (!patterns || !patterns.length) {
+      patternsEl.classList.remove("visible");
+      return;
+    }
+    patternsEl.classList.add("visible");
+    const h = document.createElement("h4");
+    h.textContent = "Repeated opening issues";
+    patternsEl.appendChild(h);
+    for (const p of patterns.slice(0, 8)) {
+      const card = document.createElement("div");
+      card.className = "pattern";
+      const moveNum = Math.ceil(p.ply / 2);
+      const dots = p.ply % 2 === 0 ? "..." : "";
+      const sevLabel = p.severity.charAt(0).toUpperCase() + p.severity.slice(1);
+      card.innerHTML =
+        `<div class="ptop"><span class="qbadge ${p.severity}">${
+          p.severity === "blunder" ? "??" : p.severity === "mistake" ? "?" : "?!"
+        }</span>${sevLabel}: ${moveNum}.${dots} ${p.move} \u00d7 ${p.count}</div>` +
+        `<div class="hint">${p.variation} \u00b7 avg loss ${(p.avg_loss_cp / 100).toFixed(1)}` +
+        (p.best_san ? ` \u00b7 better: ${p.best_san}` : "") + `</div>`;
+      patternsEl.appendChild(card);
+    }
+  }
+
   // Renders the games list, optionally filtered to one variation
   // (matched on the exact variation name from the payload).
   function render(variationName) {
+    activeFilter = variationName;
     const filtered = variationName == null
       ? gl : gl.filter(g => g.variation === variationName);
     const count = variationName == null ? op.games : filtered.length;
+    const flagged = filtered.filter(g => g._worst).length;
 
     head.innerHTML = "";
     head.appendChild(document.createTextNode(`Games (${count})`));
+    if (flagged) {
+      const fl = document.createElement("span");
+      fl.className = "gfilter";
+      fl.textContent = `\u2014 ${flagged} with opening issues`;
+      head.appendChild(fl);
+    }
     if (variationName != null) {
       const label = document.createElement("span");
       label.className = "gfilter";
@@ -1376,7 +1502,6 @@ function appendGamesSection(lines, op) {
       clear.textContent = "All games";
       clear.title = "Clear the variation filter";
       clear.onclick = () => {
-        // Keep the board as-is; just drop the filter and line highlight.
         const active = lines.querySelector(".line.active");
         if (active) active.classList.remove("active");
         render(null);
@@ -1397,6 +1522,49 @@ function appendGamesSection(lines, op) {
       rows.appendChild(more);
     }
   }
+
+  scanBtn.onclick = async () => {
+    const batch = gl.filter(g => g.san && g.san.length).slice(0, 40);
+    if (!batch.length) {
+      scanStatus.textContent = "No move data to scan.";
+      return;
+    }
+    scanBtn.disabled = true;
+    scanStatus.textContent = `Scanning ${batch.length} games (opening moves)\u2026`;
+    try {
+      const data = await api("/api/scan-blunders", "POST", {
+        games: batch.map(g => ({
+          san: g.san,
+          color: state.color,
+          variation: g.variation,
+          opponent: g.opponent,
+          date: g.date,
+          url: g.url,
+        })),
+        opening_plies: 20,
+      });
+      // Attach flags back onto the source game objects.
+      for (const sg of data.games || []) {
+        const g = batch[sg.index];
+        if (!g) continue;
+        g._flags = sg.flags || [];
+        g._worst = sg.worst;
+        g._counts = sg.counts;
+      }
+      const withIssues = (data.games || []).filter(g => g.worst).length;
+      const pats = data.patterns || [];
+      scanStatus.textContent = withIssues
+        ? `${withIssues} game${withIssues === 1 ? "" : "s"} with opening issues` +
+          (pats.length ? ` \u00b7 ${pats.length} repeated pattern${pats.length === 1 ? "" : "s"}` : "")
+        : "No opening inaccuracies found in this sample.";
+      renderPatterns(pats);
+      render(activeFilter);
+    } catch (e) {
+      scanStatus.textContent = e.message || "Scan failed";
+    } finally {
+      scanBtn.disabled = false;
+    }
+  };
 
   lines._renderGames = render;
   render(null);

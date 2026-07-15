@@ -9,6 +9,10 @@ returns opening stats per color plus a replayable main line (SAN + FENs)
 for every variation.
 
 GET /api/eval?fen=... returns a Stockfish evaluation of the position.
+
+POST /api/scan-blunders scans opening moves in a batch of games for
+inaccuracies/mistakes/blunders and returns per-game flags plus repeated
+patterns within the same variation.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -30,7 +35,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from repertoire import analyze, fetch, lichess, moves, parse  # noqa: E402
+from repertoire import analyze, classify, fetch, lichess, moves, parse  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP_DIR = Path(__file__).resolve().parent
@@ -162,6 +167,8 @@ _cache_lock = threading.Lock()
 _engine: chess.engine.SimpleEngine | None = None
 _engine_lock = threading.Lock()
 _eval_cache: dict[str, dict] = {}
+_scan_eval_cache: dict[str, dict] = {}  # shallower depth cache for blunder scans
+_scan_cache: dict[str, dict] = {}       # game-key -> scan result
 
 
 def _engine_path() -> Path | None:
@@ -341,6 +348,92 @@ def evaluate():
     }
     _eval_cache[key] = result
     return jsonify(result)
+
+
+@app.post("/api/scan-blunders")
+def scan_blunders():
+    """Scan opening moves of games for inaccuracies / mistakes / blunders.
+
+    Body: {
+      games: [{ san, color, variation?, opponent?, date?, url?, key? }],
+      opening_plies?: int (default 20),
+      player_only?: bool (default true — only flag the player whose color is set)
+    }
+    Caps the batch to keep Render-friendly response times.
+    """
+    data = _json_body()
+    games_in = data.get("games")
+    if not isinstance(games_in, list) or not games_in:
+        return jsonify({"error": "games array is required"}), 400
+
+    opening_plies = data.get("opening_plies") or classify.OPENING_PLIES
+    try:
+        opening_plies = max(4, min(30, int(opening_plies)))
+    except (TypeError, ValueError):
+        opening_plies = classify.OPENING_PLIES
+
+    # Cap batch size — each game can take a few second-depth analyses.
+    MAX_BATCH = 40
+    games_in = games_in[:MAX_BATCH]
+
+    with _engine_lock:
+        engine = _get_engine()
+        if engine is None:
+            return jsonify({"error": "Stockfish engine not found"}), 503
+
+        out_games = []
+        for i, g in enumerate(games_in):
+            if not isinstance(g, dict):
+                continue
+            san = g.get("san") or []
+            if not isinstance(san, list) or not san:
+                continue
+            color = (g.get("color") or "white").lower()
+            if color not in ("white", "black"):
+                color = "white"
+            variation = g.get("variation") or "Unknown"
+            cache_key = "|".join([
+                color,
+                str(opening_plies),
+                variation,
+                " ".join(san[:opening_plies]),
+            ])
+            if cache_key in _scan_cache:
+                cached = dict(_scan_cache[cache_key])
+                cached["index"] = i
+                out_games.append(cached)
+                continue
+
+            flags = classify.classify_game(
+                engine,
+                [str(m) for m in san],
+                color,
+                opening_plies=opening_plies,
+                eval_cache=_scan_eval_cache,
+            )
+            summary = classify.summarize_flags(flags)
+            entry = {
+                "index": i,
+                "variation": variation,
+                "opponent": g.get("opponent"),
+                "date": g.get("date"),
+                "url": g.get("url"),
+                "color": color,
+                "flags": [asdict(f) for f in flags],
+                **summary,
+            }
+            _scan_cache[cache_key] = {
+                k: v for k, v in entry.items() if k != "index"
+            }
+            out_games.append(entry)
+
+    patterns = classify.find_patterns(out_games, min_count=2)
+    return jsonify({
+        "opening_plies": opening_plies,
+        "scanned": len(out_games),
+        "games": out_games,
+        "patterns": patterns,
+    })
 
 
 MAX_FETCH_MONTHS = 240  # widest window we'll fetch (20 years ~ all history)
