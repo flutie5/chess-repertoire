@@ -99,23 +99,24 @@
   }
   #line-title { font-weight: 700; text-align: center; min-height: 22px; }
   .material-tray {
-    display: flex; align-items: center; gap: 2px;
-    width: calc(var(--board-px) + 30px); min-height: 22px;
-    padding: 0 2px;
+    display: flex; align-items: center; gap: 6px;
+    width: calc(var(--board-px) + 30px); min-height: 28px;
+    padding: 2px 4px;
   }
   .material-tray .caps {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0;
-    flex: 1; min-height: 20px;
+    flex: none; min-height: 24px;
   }
   .material-tray .caps img {
-    width: 18px; height: 18px; margin-left: -5px;
-    filter: drop-shadow(0 0 1px rgba(0,0,0,.55));
+    width: 24px; height: 24px; margin-left: -6px;
+    filter: drop-shadow(0 0 1px rgba(0,0,0,.7)) brightness(1.15);
   }
   .material-tray .caps img:first-child { margin-left: 0; }
   .material-tray .adv {
-    font-size: 13px; font-weight: 700; color: var(--text-secondary);
-    font-variant-numeric: tabular-nums; margin-left: 6px; flex: none;
-    min-width: 1.6em;
+    font-size: 15px; font-weight: 800; color: #fff;
+    font-variant-numeric: tabular-nums; flex: none;
+    min-width: 1.8em; letter-spacing: 0.02em;
+    text-shadow: 0 1px 2px rgba(0,0,0,.55);
   }
   .material-tray .adv.empty { visibility: hidden; }
   .piece-bank {
@@ -362,6 +363,11 @@
   }
   #openings::-webkit-scrollbar { width: 8px; }
   #openings::-webkit-scrollbar-thumb { background: var(--bg-card-hover); border-radius: 4px; }
+  .openings-section-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-muted); padding: 10px 4px 2px;
+  }
+  .openings-section-label:first-child { padding-top: 0; }
   .opening {
     background: var(--bg-card); border: 1px solid var(--border-subtle);
     border-radius: var(--radius); overflow: hidden;
@@ -586,6 +592,124 @@
   }
   .profile-pill.ok { color: var(--green); border-color: rgba(129,182,76,.45); }
   .profile-pill.miss { color: var(--warn-orange); border-color: rgba(229,143,42,.4); }
+
+  /* ---- my repertoire ---- */
+  #my-repertoire-btn {
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #my-repertoire-btn:hover { border-color: var(--green); background: var(--bg-card-hover); }
+  #my-repertoire-btn.active {
+    background: var(--green); color: #fff; border-color: var(--green);
+  }
+  body.repertoire-open #analyze-sidebar { display: none; }
+  body.repertoire-open #repertoire-sidebar { display: flex; }
+  body.repertoire-open #repertoire-practice { display: block; }
+  body.repertoire-open .controls { opacity: .35; pointer-events: none; }
+  body.repertoire-open #analyze-me-btn { display: none !important; }
+  #repertoire-sidebar {
+    display: none; flex-direction: column; gap: 12px; min-width: 0;
+  }
+  .rep-head {
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); padding: 12px 14px;
+  }
+  .rep-head h2 {
+    margin: 0; font-size: 15px; font-weight: 700;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .rep-head h2 .back {
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    background: none; border: 0; cursor: pointer; padding: 0;
+  }
+  .rep-head h2 .back:hover { color: var(--green); }
+  .rep-head .hint { margin: 0; color: var(--text-muted); font-size: 12px; }
+  #rep-tree {
+    flex: 1; min-height: 280px; max-height: min(62vh, 640px); overflow: auto;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); padding: 8px;
+  }
+  .rep-move-group { margin-bottom: 6px; }
+  .rep-move-group > summary,
+  .rep-family > summary {
+    cursor: pointer; list-style: none; padding: 7px 8px;
+    border-radius: var(--radius-sm); font-weight: 700; font-size: 13px;
+    color: var(--text-primary); user-select: none;
+  }
+  .rep-move-group > summary::-webkit-details-marker,
+  .rep-family > summary::-webkit-details-marker { display: none; }
+  .rep-move-group > summary:hover,
+  .rep-family > summary:hover { background: var(--bg-card-hover); }
+  .rep-move-group.inactive > summary,
+  .rep-family.inactive > summary,
+  .rep-line.inactive {
+    opacity: .32; color: var(--text-muted);
+  }
+  .rep-family { margin: 2px 0 2px 8px; }
+  .rep-line {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px 5px 16px; border-radius: var(--radius-sm);
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .rep-line:hover { background: var(--bg-card-hover); }
+  .rep-line .eco {
+    font-size: 10px; color: var(--text-muted); font-weight: 700;
+    min-width: 2.4em;
+  }
+  .rep-line .nm { flex: 1; min-width: 0; }
+  .rep-line button {
+    flex: none; background: none; border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); border-radius: var(--radius-sm);
+    padding: 3px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+  .rep-line button:hover { border-color: var(--green); color: var(--text-primary); }
+  .rep-line button.in-rep {
+    background: rgba(129,182,76,.2); border-color: var(--green); color: var(--green);
+  }
+  .rep-line.inactive button { pointer-events: none; }
+  #repertoire-practice {
+    display: none; grid-column: 1 / -1;
+    background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius); padding: 14px 16px;
+  }
+  #repertoire-practice h3 {
+    margin: 0 0 10px; font-size: 14px; font-weight: 700;
+  }
+  .rep-practice-toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    margin-bottom: 12px; color: var(--text-secondary); font-size: 13px;
+  }
+  .rep-practice-toolbar select {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 6px 10px; font-size: 13px;
+  }
+  .rep-practice-list { display: flex; flex-direction: column; gap: 6px; }
+  .rep-practice-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; border-radius: var(--radius-sm);
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+  }
+  .rep-practice-row .nm { flex: 1; min-width: 140px; font-size: 13px; font-weight: 600; }
+  .rep-practice-row .eco { color: var(--text-muted); font-size: 11px; font-weight: 700; }
+  .rep-practice-row button {
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 5px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .rep-practice-row button.primary {
+    background: var(--green); color: #fff; border-color: var(--green);
+    box-shadow: 0 3px 0 var(--green-shadow);
+  }
+  .rep-practice-row button.primary:hover { background: var(--green-hover); }
+  .rep-practice-row button:hover { border-color: var(--green); }
+  .rep-empty { color: var(--text-muted); font-size: 13px; padding: 8px 2px; }
+  body.repertoire-open.practice-mode #line-title::after {
+    content: " · Practice vs Stockfish";
+    color: var(--green); font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -599,6 +723,7 @@
   </div>
   <div class="auth-area">
     <button class="primary" id="analyze-me-btn" style="display:none">Analyze my games</button>
+    <button id="my-repertoire-btn" type="button" title="Build and practice your openings">My Repertoire</button>
     <button class="primary" id="auth-open-btn">Log in / Sign up</button>
     <button id="user-menu-btn" style="display:none"></button>
     <div id="user-menu">
@@ -722,18 +847,18 @@
     <div id="line-moves"><span class="placeholder">Pick an opening line on the right to replay it here.</span></div>
   </section>
 
-  <aside class="sidebar">
+  <aside class="sidebar" id="analyze-sidebar">
     <div class="range-wrap" id="range-wrap">
       <button id="range-btn" type="button">
         <span class="cal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg></span>
-        <span class="range-label" id="range-label">Last 12 months</span>
+        <span class="range-label" id="range-label">Last 30 days</span>
         <span class="range-chev">&#9660;</span>
       </button>
       <div id="range-panel">
-        <button class="preset" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
+        <button class="preset selected" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
         <button class="preset" type="button" data-preset="3m"><span class="tick">&#10003;</span>Last 3 months</button>
         <button class="preset" type="button" data-preset="6m"><span class="tick">&#10003;</span>Last 6 months</button>
-        <button class="preset selected" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
+        <button class="preset" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
         <button class="preset" type="button" data-preset="ytd"><span class="tick">&#10003;</span>This year</button>
         <button class="preset" type="button" data-preset="all"><span class="tick">&#10003;</span>All time</button>
         <div class="range-custom">
@@ -759,6 +884,40 @@
       <div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>
     </div>
   </aside>
+
+  <aside class="sidebar" id="repertoire-sidebar">
+    <div class="rep-head">
+      <h2>
+        My Repertoire
+        <button type="button" class="back" id="repertoire-back">&#8592; Back</button>
+      </h2>
+      <p class="hint">Build your openings by hand. Moves on the board grey out lines that no longer fit.</p>
+      <div class="color-tabs" id="rep-color-tabs">
+        <button type="button" id="rep-tab-white" class="active">As White</button>
+        <button type="button" id="rep-tab-black">As Black</button>
+      </div>
+    </div>
+    <div id="rep-tree"><div class="rep-empty">Loading opening book…</div></div>
+  </aside>
+
+  <section id="repertoire-practice" aria-label="Practice repertoire">
+    <h3>Practice vs Stockfish</h3>
+    <div class="rep-practice-toolbar">
+      <label>Difficulty
+        <select id="rep-difficulty" title="Stockfish skill">
+          <option value="1">1 — Beginner</option>
+          <option value="3">3 — Easy</option>
+          <option value="5" selected>5 — Intermediate</option>
+          <option value="7">7 — Strong</option>
+          <option value="10">10 — Hard</option>
+        </select>
+      </label>
+      <span id="rep-practice-status" class="rep-empty"></span>
+    </div>
+    <div class="rep-practice-list" id="rep-practice-list">
+      <div class="rep-empty">No openings saved yet. Add some from the tree on the right.</div>
+    </div>
+  </section>
 </main>
 
 <script type="module">
@@ -768,7 +927,7 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 const state = {
   report: null,
-  range: { preset: "12m", since: null, until: null },  // time-frame filter
+  range: { preset: "30d", since: null, until: null },  // filled on init from RANGE_PRESETS
   color: "white",           // which repertoire tab is shown
   orientation: "white",     // board perspective (independent of tab)
   ply: 0,                   // 0 = start position
@@ -778,6 +937,11 @@ const state = {
   moveFlags: [],            // opening blunder/mistake flags for current game
   lastOpeningName: null,    // deepest opening name recognized for current line
   editMode: false,         // free-place position editor
+  repertoireOpen: false,
+  repColor: "white",       // My Repertoire White/Black pill
+  myRepertoire: { white: [], black: [] },
+  practiceMode: false,
+  practiceLevel: 5,
 };
 
 /* ---------- game model (chess.js) ---------- */
@@ -821,6 +985,7 @@ function makeUserMove(from, to, promotion) {
   rebuildDerived();
   state.ply = state.sans.length;
   refreshBoard();
+  if (state.practiceMode) schedulePracticeReply();
   return true;
 }
 
@@ -1076,7 +1241,7 @@ function renderMaterialTray(el, took, pieceColorPrefix, advantageForThisSide) {
     }
   }
   if (advantageForThisSide > 0) {
-    adv.textContent = "+" + advantageForThisSide;
+    adv.textContent = "+" + Math.round(advantageForThisSide);
     adv.classList.remove("empty");
   } else {
     adv.textContent = "";
@@ -1113,6 +1278,7 @@ function refreshBoard() {
   if (state.editMode) updateEditTurnBtns();
   scheduleOpeningTitle();
   scheduleEval();
+  if (state.repertoireOpen) updateRepTreeActive();
 }
 
 /* ---------- dynamic opening title ---------- */
@@ -1231,7 +1397,7 @@ function scheduleEval() {
 async function fetchEval(fen) {
   const token = ++evalToken;
   try {
-    const resp = await fetch(`/api/eval?fen=${encodeURIComponent(fen)}`);
+    const resp = await fetchApi(`/api/eval?fen=${encodeURIComponent(fen)}`);
     if (resp.status === 503) {
       engineAvailable = false;
       enginePanel.classList.remove("visible");
@@ -1659,6 +1825,86 @@ function loadGameReplay(g) {
 const openingsEl = document.getElementById("openings");
 const summaryEl = document.getElementById("summary");
 
+/** Black-defense family names (ECO naming) — still White games when you face them. */
+function isDefenseFamily(name) {
+  return /\bDefen[cs]e\b/i.test(name || "");
+}
+
+/** White-system family names typically faced when you're Black. */
+function isWhiteSystemFamily(name) {
+  if (isDefenseFamily(name)) return false;
+  return /\b(Opening|Attack|Gambit|Game|System)\b/i.test(name || "");
+}
+
+function partitionOpeningsForColor(color, openings) {
+  const yours = [];
+  const faced = [];
+  for (const op of openings) {
+    if (color === "white") {
+      (isDefenseFamily(op.name) ? faced : yours).push(op);
+    } else {
+      (isWhiteSystemFamily(op.name) ? faced : yours).push(op);
+    }
+  }
+  return { yours, faced };
+}
+
+function displayOpeningName(color, name) {
+  if (color === "white" && isDefenseFamily(name) && !/^vs\s/i.test(name)) {
+    return "vs " + name;
+  }
+  if (color === "black" && isWhiteSystemFamily(name) && !/^vs\s/i.test(name)) {
+    return "vs " + name;
+  }
+  return name;
+}
+
+function appendOpeningBox(op, displayName) {
+  const box = document.createElement("div");
+  box.className = "opening";
+
+  const head = document.createElement("div");
+  head.className = "opening-head";
+  head.innerHTML =
+    `<span class="chev">\u25B8</span>` +
+    `<span class="name"></span>` +
+    `<span class="meta">${op.games} games \u00B7 ${op.score}%</span>` +
+    `<span class="scorebar"><i style="width:${op.score}%"></i></span>`;
+  head.querySelector(".name").textContent = displayName;
+  head.onclick = () => box.classList.toggle("open");
+  box.appendChild(head);
+
+  const lines = document.createElement("div");
+  lines.className = "lines";
+  for (const v of op.variations) {
+    const row = document.createElement("div");
+    row.className = "line";
+    row.dataset.key = op.name + "||" + v.name;
+    const showBar = v.games > 3 && v.score != null;
+    row.innerHTML =
+      `<span class="lname"></span>` +
+      `<span class="lgames">${v.games} game${v.games === 1 ? "" : "s"}</span>` +
+      (showBar ? `<span class="scorebar" title="${v.score}% score"><i style="width:${v.score}%"></i></span>` : "");
+    row.querySelector(".lname").textContent = v.name;
+    if (!v.san.length) {
+      row.style.opacity = ".5";
+      row.title = "No replayable moves found for this line";
+    }
+    row.onclick = () => {
+      if (row.classList.contains("active")) {
+        row.classList.remove("active");
+        if (lines._renderGames) lines._renderGames(null);
+        return;
+      }
+      if (v.san.length) loadLine(v, op.name);
+    };
+    lines.appendChild(row);
+  }
+  appendGamesSection(lines, op);
+  box.appendChild(lines);
+  openingsEl.appendChild(box);
+}
+
 function renderSidebar() {
   openingsEl.innerHTML = "";
   if (!state.report) {
@@ -1667,57 +1913,46 @@ function renderSidebar() {
     return;
   }
   const rep = state.report[state.color];
+  if (!rep) {
+    openingsEl.innerHTML = '<div class="empty-note">No data for this color.</div>';
+    summaryEl.textContent = "";
+    return;
+  }
   summaryEl.textContent =
     `${rep.total_games} games as ${state.color} \u2014 ${rep.score}% score`;
 
-  if (!rep.openings.length) {
+  // Only openings from games where the player sat this color.
+  const openings = (rep.openings || []).filter(op => {
+    const games = op.game_list || [];
+    if (!games.length) return true;
+    return games.every(g => !g.color || g.color === state.color);
+  });
+
+  if (!openings.length) {
     openingsEl.innerHTML = '<div class="empty-note">No games match the selected time controls.</div>';
     return;
   }
 
-  for (const op of rep.openings) {
-    const box = document.createElement("div");
-    box.className = "opening";
+  const { yours, faced } = partitionOpeningsForColor(state.color, openings);
 
-    const head = document.createElement("div");
-    head.className = "opening-head";
-    head.innerHTML =
-      `<span class="chev">\u25B8</span>` +
-      `<span class="name">${op.name}</span>` +
-      `<span class="meta">${op.games} games \u00B7 ${op.score}%</span>` +
-      `<span class="scorebar"><i style="width:${op.score}%"></i></span>`;
-    head.onclick = () => box.classList.toggle("open");
-    box.appendChild(head);
+  if (yours.length) {
+    const lab = document.createElement("div");
+    lab.className = "openings-section-label";
+    lab.textContent = state.color === "white"
+      ? "Your openings (as White)"
+      : "Your defenses (as Black)";
+    openingsEl.appendChild(lab);
+    for (const op of yours) appendOpeningBox(op, displayOpeningName(state.color, op.name));
+  }
 
-    const lines = document.createElement("div");
-    lines.className = "lines";
-    for (const v of op.variations) {
-      const row = document.createElement("div");
-      row.className = "line";
-      row.dataset.key = op.name + "||" + v.name;
-      const showBar = v.games > 3 && v.score != null;
-      row.innerHTML =
-        `<span class="lname">${v.name}</span>` +
-        `<span class="lgames">${v.games} game${v.games === 1 ? "" : "s"}</span>` +
-        (showBar ? `<span class="scorebar" title="${v.score}% score"><i style="width:${v.score}%"></i></span>` : "");
-      if (!v.san.length) {
-        row.style.opacity = ".5";
-        row.title = "No replayable moves found for this line";
-      }
-      row.onclick = () => {
-        if (row.classList.contains("active")) {
-          // Second click deselects the line and restores the full games list.
-          row.classList.remove("active");
-          if (lines._renderGames) lines._renderGames(null);
-          return;
-        }
-        if (v.san.length) loadLine(v, op.name);
-      };
-      lines.appendChild(row);
-    }
-    appendGamesSection(lines, op);
-    box.appendChild(lines);
-    openingsEl.appendChild(box);
+  if (faced.length) {
+    const lab = document.createElement("div");
+    lab.className = "openings-section-label";
+    lab.textContent = state.color === "white"
+      ? "Defenses you faced (still as White)"
+      : "Lines you faced (still as Black)";
+    openingsEl.appendChild(lab);
+    for (const op of faced) appendOpeningBox(op, displayOpeningName(state.color, op.name));
   }
 }
 
@@ -1788,7 +2023,8 @@ function makeGameRow(g) {
 }
 
 function appendGamesSection(lines, op) {
-  const gl = op.game_list || [];
+  // Never list the other color's games under this tab.
+  const gl = (op.game_list || []).filter(g => !g.color || g.color === state.color);
   if (!gl.length) return;
 
   const scanRow = document.createElement("div");
@@ -1955,6 +2191,25 @@ const meBtn = document.getElementById("analyze-me-btn");
 
 let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" report)
 
+/** Prefer same-origin /api proxy; fall back to Render if Netlify returns HTML 404s. */
+const RENDER_API = "https://chess-repertoire-bteo.onrender.com";
+let apiBase = "";  // "" = same origin
+
+function apiUrl(path) {
+  if (path.startsWith("http")) return path;
+  return apiBase + path;
+}
+
+function looksLikeProxyMiss(status, text) {
+  if (status === 404 || status === 502 || status === 503) {
+    const t = (text || "").trim().slice(0, 80).toLowerCase();
+    if (!t || t.startsWith("<!doctype") || t.startsWith("<html") || t.startsWith("not found")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function readJson(resp) {
   const text = await resp.text();
   if (!text) {
@@ -1963,23 +2218,29 @@ async function readJson(resp) {
         "Gateway timed out before the server responded. Wait a moment and try again."
       );
     }
-    throw new Error(
-      resp.status
-        ? `Empty response (HTTP ${resp.status}). The API may still be waking up — try again.`
-        : "Empty response from server. Try again."
+    throw Object.assign(
+      new Error(
+        resp.status
+          ? `Empty response (HTTP ${resp.status}). The API may still be waking up — try again.`
+          : "Empty response from server. Try again."
+      ),
+      { httpStatus: resp.status, rawBody: text, isProxyMiss: looksLikeProxyMiss(resp.status, text) }
     );
   }
   try {
     return JSON.parse(text);
   } catch (e) {
-    if (resp.status === 405) {
-      throw new Error(
-        "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again."
-      );
-    }
-    throw new Error(
-      `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`
+    const err = new Error(
+      resp.status === 405
+        ? "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again."
+        : looksLikeProxyMiss(resp.status, text)
+          ? "API proxy returned 404. Retrying via the Render backend…"
+          : `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`
     );
+    err.httpStatus = resp.status;
+    err.rawBody = text;
+    err.isProxyMiss = looksLikeProxyMiss(resp.status, text);
+    throw err;
   }
 }
 
@@ -1987,7 +2248,55 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function runReport(startPath, fetchingMsg) {
+async function fetchApi(path, opts = {}) {
+  const resp = await fetch(apiUrl(path), {
+    credentials: apiBase ? "omit" : "same-origin",
+    ...opts,
+  });
+  return resp;
+}
+
+async function ensureApiBase() {
+  if (apiBase || location.hostname.includes("onrender.com") ||
+      location.hostname === "127.0.0.1" || location.hostname === "localhost") {
+    return;
+  }
+  // Probe same-origin proxy once; if it's a dead Netlify site, switch to Render.
+  try {
+    const resp = await fetch("/api/me", { credentials: "same-origin" });
+    const text = await resp.text();
+    if (looksLikeProxyMiss(resp.status, text) && resp.status === 404 &&
+        (text.trim().startsWith("Not Found") || !text.trim().startsWith("{"))) {
+      // Confirm it's not Flask JSON 401
+      try { JSON.parse(text); return; } catch (_) {}
+      apiBase = RENDER_API;
+    }
+  } catch (_) {
+    apiBase = RENDER_API;
+  }
+}
+
+function applyReport(data) {
+  state.report = data;
+  let msg = `${data.analyzed_games} rated games analyzed (${
+    data.since || data.until
+      ? rangeLabel.textContent
+      : `last ${data.months} months`})`;
+  if (data.warnings && data.warnings.length) msg += ` \u2014 ${data.warnings.join("; ")}`;
+  statusEl.textContent = msg;
+  if (data.warnings && data.warnings.length) statusEl.className = "error";
+  setColor(state.color);
+}
+
+async function runReportSync(syncPath, fetchingMsg) {
+  statusEl.textContent = fetchingMsg.replace(/\u2026.*$/, "") + "\u2026 (direct)";
+  const resp = await fetchApi(syncPath);
+  const data = await readJson(resp);
+  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  applyReport(data);
+}
+
+async function runReport(startPath, syncPath, fetchingMsg) {
   const tcs = [...document.querySelectorAll("#tc-group input:checked")].map(c => c.value);
   if (!tcs.length) { statusEl.textContent = "Pick at least one time control."; statusEl.className = "error"; return; }
 
@@ -1995,24 +2304,78 @@ async function runReport(startPath, fetchingMsg) {
   meBtn.disabled = true;
   statusEl.className = "";
   statusEl.textContent = fetchingMsg;
+  const qs = `&time_classes=${tcs.join(",")}${rangeQuery()}`;
+
   try {
-    const qs = `&time_classes=${tcs.join(",")}${rangeQuery()}`;
-    const startResp = await fetch(`${startPath}${qs}`, {
-      credentials: "same-origin",
-    });
-    const start = await readJson(startResp);
-    if (!startResp.ok) throw new Error(start.error || `HTTP ${startResp.status}`);
+    await ensureApiBase();
+
+    let startResp;
+    let start;
+    try {
+      startResp = await fetchApi(`${startPath}${qs}`);
+      start = await readJson(startResp);
+    } catch (e) {
+      if (e.isProxyMiss && !apiBase) {
+        apiBase = RENDER_API;
+        statusEl.textContent = "Netlify API proxy missing — using Render directly\u2026";
+        startResp = await fetchApi(`${startPath}${qs}`);
+        start = await readJson(startResp);
+      } else if (e.isProxyMiss || e.httpStatus === 404 || e.httpStatus === 405) {
+        // Jobs endpoint unavailable — sync fallback
+        await runReportSync(`${syncPath}${qs}`, fetchingMsg);
+        return;
+      } else {
+        throw e;
+      }
+    }
+
+    if (!startResp.ok) {
+      if (startResp.status === 404 || startResp.status === 405) {
+        await runReportSync(`${syncPath}${qs}`, fetchingMsg);
+        return;
+      }
+      throw new Error(start.error || `HTTP ${startResp.status}`);
+    }
+    if (!start.job_id) {
+      await runReportSync(`${syncPath}${qs}`, fetchingMsg);
+      return;
+    }
 
     const jobId = start.job_id;
     const deadline = Date.now() + 5 * 60 * 1000;
     let dots = 0;
+    let consecutiveFails = 0;
     while (Date.now() < deadline) {
       await sleep(1500);
-      const pollResp = await fetch(`/api/report/jobs/${encodeURIComponent(jobId)}`, {
-        credentials: "same-origin",
-      });
-      const data = await readJson(pollResp);
-      if (!pollResp.ok) throw new Error(data.error || `HTTP ${pollResp.status}`);
+      let pollResp;
+      let data;
+      try {
+        pollResp = await fetchApi(`/api/report/jobs/${encodeURIComponent(jobId)}`);
+        data = await readJson(pollResp);
+        consecutiveFails = 0;
+      } catch (e) {
+        consecutiveFails++;
+        if (e.isProxyMiss && !apiBase) {
+          apiBase = RENDER_API;
+          continue;
+        }
+        // Fail fast — do not poll for 5 minutes on a broken proxy
+        if (consecutiveFails >= 2) {
+          throw new Error(
+            e.isProxyMiss
+              ? "Cannot reach the analysis API (404). Open https://chess-repertoire-bteo.onrender.com/ or fix the Netlify /api proxy."
+              : e.message
+          );
+        }
+        continue;
+      }
+
+      if (!pollResp.ok) {
+        if (pollResp.status === 404) {
+          throw new Error(data.error || "Analysis job expired. Click Analyze again.");
+        }
+        throw new Error(data.error || `HTTP ${pollResp.status}`);
+      }
 
       if (data.status === "pending" || data.status === "running") {
         dots = (dots + 1) % 4;
@@ -2023,17 +2386,7 @@ async function runReport(startPath, fetchingMsg) {
       if (data.status === "error") throw new Error(data.error || "Analysis failed");
       if (data.status !== "done") throw new Error(`Unexpected job status: ${data.status}`);
 
-      state.report = data.report;
-      let msg = `${data.report.analyzed_games} rated games analyzed (${
-        data.report.since || data.report.until
-          ? rangeLabel.textContent
-          : `last ${data.report.months} months`})`;
-      if (data.report.warnings && data.report.warnings.length) {
-        msg += ` \u2014 ${data.report.warnings.join("; ")}`;
-      }
-      statusEl.textContent = msg;
-      if (data.report.warnings && data.report.warnings.length) statusEl.className = "error";
-      setColor(state.color);
+      applyReport(data.report);
       return;
     }
     throw new Error("Analysis timed out after 5 minutes. Try a shorter date range.");
@@ -2052,6 +2405,7 @@ async function analyzeUser() {
   lastAnalyze = analyzeUser;
   await runReport(
     `/api/report/jobs?username=${encodeURIComponent(username)}`,
+    `/api/report?username=${encodeURIComponent(username)}`,
     "Fetching games from chess.com\u2026 (first run can take up to a minute)"
   );
 }
@@ -2060,6 +2414,7 @@ async function analyzeMe() {
   lastAnalyze = analyzeMe;
   await runReport(
     "/api/report/me/jobs?1=1",
+    "/api/report/me?1=1",
     "Fetching games from your linked accounts\u2026 (first run can take up to a minute)"
   );
 }
@@ -2094,6 +2449,10 @@ const RANGE_PRESETS = {
   "ytd": { label: "This year",      since: () => `${new Date().getFullYear()}-01-01` },
   "all": { label: "All time",       since: () => "2005-01-01" },  // predates chess.com archives
 };
+
+// Default calendar selection: last 30 days (must set `since` so Analyze uses it).
+state.range = { preset: "30d", since: RANGE_PRESETS["30d"].since(), until: null };
+rangeLabel.textContent = RANGE_PRESETS["30d"].label;
 
 function rangeQuery() {
   let q = "";
@@ -2176,9 +2535,11 @@ function setUser(user) {
   if (loggedIn) {
     userMenuBtn.textContent = user.email;
     fillProfileForm(user);
+    loadRepertoireFromServer();
   } else {
     userMenu.classList.remove("open");
     closeProfile();
+    loadRepertoireFromLocal();
   }
 }
 
@@ -2199,6 +2560,7 @@ function openProfile() {
     authModal.classList.add("open");
     return;
   }
+  closeRepertoire();
   fillProfileForm(currentUser);
   setMsg(profileMsg, "");
   setMsg(profilePwMsg, "");
@@ -2211,13 +2573,13 @@ function closeProfile() {
 }
 
 async function api(path, method, body) {
-  const resp = await fetch(path, {
+  await ensureApiBase();
+  const resp = await fetchApi(path, {
     method,
-    credentials: "include",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await resp.json().catch(() => ({}));
+  const data = await readJson(resp);
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   return data;
 }
@@ -2615,8 +2977,411 @@ document.addEventListener("pointercancel", () => {
   drag = null;
 });
 
+/* ---------- my repertoire ---------- */
+
+const REP_LS = "myRepertoire";
+const UCI_FIRST_LABEL = {
+  e2e4: "1.e4", d2d4: "1.d4", c2c4: "1.c4", g1f3: "1.Nf3",
+  b1c3: "1.Nc3", f2f4: "1.f4", g2g3: "1.g3", b2b3: "1.b3",
+  b2b4: "1.b4", e2e3: "1.e3", a2a3: "1.a3", a2a4: "1.a4",
+  g2g4: "1.g4", f2f3: "1.f3", h2h4: "1.h4", g1h3: "1.Nh3",
+};
+let repTreeBuilt = false;
+let practiceBusy = false;
+let practiceTimer = null;
+
+function normalizeRepData(data) {
+  const out = { white: [], black: [] };
+  for (const color of ["white", "black"]) {
+    const list = Array.isArray(data?.[color]) ? data[color] : [];
+    const seen = new Set();
+    for (const e of list) {
+      if (!e || !e.play || !e.name) continue;
+      if (seen.has(e.play)) continue;
+      seen.add(e.play);
+      out[color].push({
+        play: String(e.play),
+        name: String(e.name),
+        eco: String(e.eco || ""),
+      });
+    }
+  }
+  return out;
+}
+
+function loadRepertoireFromLocal() {
+  try {
+    state.myRepertoire = normalizeRepData(JSON.parse(localStorage.getItem(REP_LS) || "{}"));
+  } catch (e) {
+    state.myRepertoire = { white: [], black: [] };
+  }
+  renderPracticeList();
+  if (repTreeBuilt) updateRepTreeButtons();
+}
+
+async function loadRepertoireFromServer() {
+  try {
+    const data = await api("/api/me/repertoire", "GET");
+    state.myRepertoire = normalizeRepData(data);
+    localStorage.setItem(REP_LS, JSON.stringify(state.myRepertoire));
+  } catch (e) {
+    loadRepertoireFromLocal();
+    return;
+  }
+  renderPracticeList();
+  if (repTreeBuilt) updateRepTreeButtons();
+}
+
+async function persistRepertoire() {
+  localStorage.setItem(REP_LS, JSON.stringify(state.myRepertoire));
+  if (!currentUser) return;
+  try {
+    await api("/api/me/repertoire", "PUT", state.myRepertoire);
+  } catch (e) {
+    console.warn("repertoire sync failed", e);
+  }
+}
+
+function familyName(name) {
+  return (name || "").split(":")[0].trim() || name || "Opening";
+}
+
+function playCompatible(currentParts, openingPlay) {
+  const op = String(openingPlay || "").split(",").filter(Boolean);
+  const n = Math.min(currentParts.length, op.length);
+  for (let i = 0; i < n; i++) {
+    if (currentParts[i] !== op[i]) return false;
+  }
+  return true;
+}
+
+function currentPlayParts() {
+  return state.moves.slice(0, state.ply).map(m => m.from + m.to + (m.promotion || ""));
+}
+
+function isInMyRep(play) {
+  return state.myRepertoire[state.repColor].some(e => e.play === play);
+}
+
+function toggleRepOpening(entry) {
+  const list = state.myRepertoire[state.repColor];
+  const i = list.findIndex(e => e.play === entry.play);
+  if (i >= 0) list.splice(i, 1);
+  else list.push({ play: entry.play, name: entry.name, eco: entry.eco || "" });
+  persistRepertoire();
+  updateRepTreeButtons();
+  renderPracticeList();
+}
+
+function uciToSanLine(play) {
+  try {
+    const c = new Chess();
+    const sans = [];
+    for (const u of String(play).split(",").filter(Boolean)) {
+      const from = u.slice(0, 2), to = u.slice(2, 4), promotion = u.slice(4) || undefined;
+      const m = c.move({ from, to, promotion });
+      if (!m) break;
+      sans.push(m.san);
+    }
+    return sans;
+  } catch (e) {
+    return [];
+  }
+}
+
+async function ensureRepTree() {
+  await ensureOpeningBook();
+  if (repTreeBuilt) {
+    updateRepTreeActive();
+    updateRepTreeButtons();
+    return;
+  }
+  const treeEl = document.getElementById("rep-tree");
+  if (!openingBook || !Object.keys(openingBook).length) {
+    treeEl.innerHTML = '<div class="rep-empty">Opening book unavailable.</div>';
+    return;
+  }
+
+  // Prefer shortest play per exact name; group by first move → family → lines
+  const byName = new Map();
+  for (const [play, meta] of Object.entries(openingBook)) {
+    if (!meta || !meta.name) continue;
+    const parts = play.split(",").filter(Boolean);
+    if (!parts.length || parts.length > 8) continue;
+    const prev = byName.get(meta.name);
+    if (!prev || parts.length < prev.parts.length) {
+      byName.set(meta.name, { play, name: meta.name, eco: meta.eco || "", parts });
+    }
+  }
+
+  const roots = new Map(); // firstUci -> Map(family -> entries[])
+  for (const entry of byName.values()) {
+    const first = entry.parts[0];
+    if (!roots.has(first)) roots.set(first, new Map());
+    const fam = familyName(entry.name);
+    const fm = roots.get(first);
+    if (!fm.has(fam)) fm.set(fam, []);
+    fm.get(fam).push(entry);
+  }
+
+  const preferred = ["e2e4", "d2d4", "c2c4", "g1f3"];
+  const firstMoves = [
+    ...preferred.filter(m => roots.has(m)),
+    ...[...roots.keys()].filter(m => !preferred.includes(m))
+      .sort((a, b) => (roots.get(b).size - roots.get(a).size) || a.localeCompare(b)),
+  ];
+
+  treeEl.innerHTML = "";
+  for (const first of firstMoves) {
+    const families = roots.get(first);
+    const moveDet = document.createElement("details");
+    moveDet.className = "rep-move-group";
+    moveDet.open = first === "e2e4" || first === "d2d4";
+    moveDet.dataset.first = first;
+    const moveSum = document.createElement("summary");
+    moveSum.textContent = UCI_FIRST_LABEL[first] || first;
+    moveDet.appendChild(moveSum);
+
+    const famNames = [...families.keys()].sort((a, b) => a.localeCompare(b));
+    for (const fam of famNames) {
+      const lines = families.get(fam).sort((a, b) => a.name.localeCompare(b.name));
+      const famDet = document.createElement("details");
+      famDet.className = "rep-family";
+      famDet.dataset.plays = lines.map(l => l.play).join("|");
+      const famSum = document.createElement("summary");
+      famSum.textContent = `${fam} (${lines.length})`;
+      famDet.appendChild(famSum);
+      for (const line of lines) {
+        const row = document.createElement("div");
+        row.className = "rep-line";
+        row.dataset.play = line.play;
+        row.innerHTML =
+          `<span class="eco">${line.eco || ""}</span>` +
+          `<span class="nm"></span>` +
+          `<button type="button"></button>`;
+        row.querySelector(".nm").textContent = line.name;
+        const btn = row.querySelector("button");
+        btn.onclick = ev => {
+          ev.stopPropagation();
+          toggleRepOpening(line);
+        };
+        famDet.appendChild(row);
+      }
+      moveDet.appendChild(famDet);
+    }
+    treeEl.appendChild(moveDet);
+  }
+
+  repTreeBuilt = true;
+  updateRepTreeButtons();
+  updateRepTreeActive();
+}
+
+function updateRepTreeButtons() {
+  document.querySelectorAll("#rep-tree .rep-line").forEach(row => {
+    const play = row.dataset.play;
+    const btn = row.querySelector("button");
+    if (!btn) return;
+    const on = isInMyRep(play);
+    btn.textContent = on ? "In repertoire" : "Add to my repertoire";
+    btn.classList.toggle("in-rep", on);
+  });
+}
+
+function updateRepTreeActive() {
+  if (!state.repertoireOpen || !repTreeBuilt) return;
+  const cur = currentPlayParts();
+  document.querySelectorAll("#rep-tree .rep-line").forEach(row => {
+    const ok = playCompatible(cur, row.dataset.play);
+    row.classList.toggle("inactive", !ok);
+  });
+  document.querySelectorAll("#rep-tree .rep-family").forEach(fam => {
+    const plays = (fam.dataset.plays || "").split("|").filter(Boolean);
+    const ok = plays.some(p => playCompatible(cur, p));
+    fam.classList.toggle("inactive", !ok);
+  });
+  document.querySelectorAll("#rep-tree .rep-move-group").forEach(g => {
+    const first = g.dataset.first;
+    const ok = !cur.length || cur[0] === first;
+    g.classList.toggle("inactive", !ok);
+  });
+}
+
+function setRepColor(color) {
+  state.repColor = color === "black" ? "black" : "white";
+  document.getElementById("rep-tab-white").classList.toggle("active", state.repColor === "white");
+  document.getElementById("rep-tab-black").classList.toggle("active", state.repColor === "black");
+  updateRepTreeButtons();
+  renderPracticeList();
+}
+
+function renderPracticeList() {
+  const el = document.getElementById("rep-practice-list");
+  if (!el) return;
+  const list = state.myRepertoire[state.repColor] || [];
+  if (!list.length) {
+    el.innerHTML = `<div class="rep-empty">No openings saved for ${state.repColor} yet. Add some from the tree.</div>`;
+    return;
+  }
+  el.innerHTML = "";
+  for (const entry of list) {
+    const row = document.createElement("div");
+    row.className = "rep-practice-row";
+    row.innerHTML =
+      `<span class="eco">${entry.eco || ""}</span>` +
+      `<span class="nm"></span>` +
+      `<button type="button" class="primary" data-act="practice">Practice</button>` +
+      `<button type="button" data-act="load">Load line</button>` +
+      `<button type="button" data-act="remove">Remove</button>`;
+    row.querySelector(".nm").textContent = entry.name;
+    row.querySelector('[data-act="practice"]').onclick = () => startPractice(entry);
+    row.querySelector('[data-act="load"]').onclick = () => loadRepLine(entry, false);
+    row.querySelector('[data-act="remove"]').onclick = () => {
+      toggleRepOpening(entry);
+    };
+    el.appendChild(row);
+  }
+}
+
+function loadRepLine(entry, enterPractice) {
+  stopPractice();
+  const sans = uciToSanLine(entry.play);
+  const g = new Chess();
+  for (const san of sans) {
+    try { g.move(san); } catch (e) { break; }
+  }
+  freeFen = null;
+  gameRootFen = START_FEN;
+  game = g;
+  rebuildDerived();
+  state.ply = state.sans.length;
+  state.moveFlags = [];
+  state.lastOpeningName = entry.name;
+  state.orientation = state.repColor;
+  if (enterPractice) {
+    state.practiceMode = true;
+    document.body.classList.add("practice-mode");
+  }
+  setBoardTitle(entry.name + (entry.eco ? ` (${entry.eco})` : ""));
+  refreshBoard();
+}
+
+function stopPractice() {
+  state.practiceMode = false;
+  document.body.classList.remove("practice-mode");
+  practiceBusy = false;
+  clearTimeout(practiceTimer);
+  const st = document.getElementById("rep-practice-status");
+  if (st) st.textContent = "";
+}
+
+function startPractice(entry) {
+  state.practiceLevel = +document.getElementById("rep-difficulty").value || 5;
+  loadRepLine(entry, true);
+  const st = document.getElementById("rep-practice-status");
+  if (state.repColor === "black") {
+    if (st) st.textContent = "Stockfish (White) is thinking…";
+    schedulePracticeReply();
+  } else if (st) {
+    st.textContent = "Your move as White. Stockfish will reply.";
+  }
+}
+
+function schedulePracticeReply() {
+  clearTimeout(practiceTimer);
+  practiceTimer = setTimeout(runPracticeReply, 250);
+}
+
+async function runPracticeReply() {
+  if (!state.practiceMode || practiceBusy || state.editMode) return;
+  const fen = currentFen();
+  let turn;
+  try {
+    const c = new Chess(fen);
+    if (c.isGameOver()) {
+      document.getElementById("rep-practice-status").textContent = "Game over.";
+      return;
+    }
+    turn = c.turn();
+  } catch (e) {
+    return;
+  }
+  // User plays repColor; engine plays the other side
+  const userIsWhite = state.repColor === "white";
+  const engineToMove = userIsWhite ? turn === "b" : turn === "w";
+  if (!engineToMove) {
+    document.getElementById("rep-practice-status").textContent =
+      `Your move as ${state.repColor === "white" ? "White" : "Black"}.`;
+    return;
+  }
+
+  practiceBusy = true;
+  document.getElementById("rep-practice-status").textContent = "Stockfish is thinking…";
+  try {
+    const data = await api("/api/practice-move", "POST", {
+      fen,
+      level: state.practiceLevel || +document.getElementById("rep-difficulty").value || 5,
+    });
+    if (!state.practiceMode) return;
+    if (state.ply < state.sans.length) truncateToPly();
+    game.move({ from: data.from, to: data.to, promotion: data.promotion || undefined });
+    rebuildDerived();
+    state.ply = state.sans.length;
+    refreshBoard();
+    document.getElementById("rep-practice-status").textContent =
+      `Stockfish played ${data.san}. Your move.`;
+  } catch (e) {
+    document.getElementById("rep-practice-status").textContent = e.message;
+  } finally {
+    practiceBusy = false;
+  }
+}
+
+async function openRepertoire() {
+  closeProfile();
+  if (state.editMode) setEditMode(false);
+  stopPractice();
+  state.repertoireOpen = true;
+  document.body.classList.add("repertoire-open");
+  document.getElementById("my-repertoire-btn").classList.add("active");
+  setRepColor(state.repColor);
+  state.orientation = state.repColor;
+  resetGame();
+  setBoardTitle("My Repertoire");
+  await ensureRepTree();
+  renderPracticeList();
+}
+
+function closeRepertoire() {
+  if (!state.repertoireOpen) return;
+  stopPractice();
+  state.repertoireOpen = false;
+  document.body.classList.remove("repertoire-open");
+  document.getElementById("my-repertoire-btn").classList.remove("active");
+}
+
+document.getElementById("my-repertoire-btn").onclick = () => {
+  if (state.repertoireOpen) closeRepertoire();
+  else openRepertoire();
+};
+document.getElementById("repertoire-back").onclick = () => closeRepertoire();
+document.getElementById("rep-tab-white").onclick = () => {
+  setRepColor("white");
+  state.orientation = "white";
+  if (state.repertoireOpen) refreshBoard();
+};
+document.getElementById("rep-tab-black").onclick = () => {
+  setRepColor("black");
+  state.orientation = "black";
+  if (state.repertoireOpen) refreshBoard();
+};
+document.getElementById("rep-difficulty").onchange = e => {
+  state.practiceLevel = +e.target.value || 5;
+};
+
 /* ---------- init ---------- */
 
+loadRepertoireFromLocal();
 rebuildDerived();
 refreshBoard();
 updateEditTurnBtns();

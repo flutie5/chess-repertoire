@@ -94,6 +94,31 @@ if _cors_origins:
         supports_credentials=True,
     )
 
+
+@app.after_request
+def _cors_netlify_fallback(resp):
+    """Allow Netlify frontends to call the Render API if the /api proxy is broken."""
+    if "Access-Control-Allow-Origin" in resp.headers:
+        return resp
+    origin = request.headers.get("Origin") or ""
+    if (
+        origin.endswith(".netlify.app")
+        or origin.endswith(".netlify.com")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://localhost:")
+    ):
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+@app.route("/api/<path:_any>", methods=["OPTIONS"])
+def _cors_preflight(_any: str):
+    return ("", 204)
+
 # ---- Accounts (SQLite + signed session cookie) ----
 
 SECRET_KEY_FILE = WEBAPP_DIR / ".secret_key"
@@ -139,6 +164,18 @@ def _init_db() -> None:
                 chesscom_username TEXT NOT NULL DEFAULT '',
                 lichess_username TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_repertoire (
+                user_id INTEGER NOT NULL,
+                color TEXT NOT NULL CHECK (color IN ('white', 'black')),
+                play TEXT NOT NULL,
+                name TEXT NOT NULL,
+                eco TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (user_id, color, play)
             )
             """
         )
@@ -278,6 +315,7 @@ def _game_entry(g, san: list[str]) -> dict:
         "url": g.url,
         "variation": g.opening_full,
         "san": san[:moves.MAX_GAME_PLIES],
+        "color": g.color,
     }
 
 
@@ -304,7 +342,9 @@ def _color_payload(report, games_with_moves):
                                         key=lambda kv: -kv[1])
         ]
         family_games = sorted(by_family.get(op.name, []),
-                              key=lambda pair: -pair[0].end_time)
+                          key=lambda pair: -pair[0].end_time)
+        # Extra guard: only this color's games appear under this tab.
+        family_games = [(g, mv) for g, mv in family_games if g.color == report.color]
         openings.append({
             "name": op.name,
             "games": op.games,
@@ -377,6 +417,63 @@ def evaluate():
     }
     _eval_cache[key] = result
     return jsonify(result)
+
+
+@app.post("/api/practice-move")
+def practice_move():
+    """Return one Stockfish move at a reduced skill level for repertoire practice."""
+    data = _json_body()
+    fen = (data.get("fen") or "").strip()
+    if not fen:
+        return jsonify({"error": "fen is required"}), 400
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return jsonify({"error": "invalid FEN"}), 400
+    if board.is_game_over():
+        return jsonify({"error": "game over"}), 400
+
+    try:
+        level = int(data.get("level") or 5)
+    except (TypeError, ValueError):
+        level = 5
+    level = max(1, min(10, level))
+    skill = max(0, min(20, (level - 1) * 2))
+    depth = 3 + level  # 4..13
+
+    with _engine_lock:
+        engine = _get_engine()
+        if engine is None:
+            return jsonify({"error": "Stockfish engine not found"}), 503
+        try:
+            engine.configure({"Skill Level": skill})
+            result = engine.play(board, chess.engine.Limit(depth=depth, time=0.4))
+        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+            _reset_engine()
+            return jsonify({"error": f"engine failed: {exc}"}), 500
+        finally:
+            try:
+                engine.configure({"Skill Level": 20})
+            except Exception:
+                pass
+
+    move = result.move
+    if move is None:
+        return jsonify({"error": "no move"}), 500
+    san = board.san(move)
+    promo = None
+    if move.promotion:
+        promo = chess.piece_symbol(move.promotion).lower()
+    board.push(move)
+    return jsonify({
+        "from": chess.square_name(move.from_square),
+        "to": chess.square_name(move.to_square),
+        "promotion": promo,
+        "san": san,
+        "fen": board.fen(),
+        "level": level,
+        "skill": skill,
+    })
 
 
 @app.get("/api/opening")
@@ -868,6 +965,67 @@ def me():
     if user is None:
         return jsonify({"error": "not logged in"}), 401
     return jsonify(_user_payload(user))
+
+
+def _repertoire_payload(user_id: int) -> dict:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT color, play, name, eco FROM user_repertoire WHERE user_id = ? "
+            "ORDER BY name COLLATE NOCASE",
+            (user_id,),
+        ).fetchall()
+    out = {"white": [], "black": []}
+    for r in rows:
+        out[r["color"]].append({
+            "play": r["play"],
+            "name": r["name"],
+            "eco": r["eco"] or "",
+        })
+    return out
+
+
+@app.get("/api/me/repertoire")
+def get_repertoire():
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "not logged in"}), 401
+    return jsonify(_repertoire_payload(user["id"]))
+
+
+@app.put("/api/me/repertoire")
+def put_repertoire():
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "not logged in"}), 401
+    data = _json_body()
+    items = []
+    for color in ("white", "black"):
+        entries = data.get(color)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            return jsonify({"error": f"{color} must be a list"}), 400
+        for e in entries[:200]:
+            if not isinstance(e, dict):
+                continue
+            play = (e.get("play") or "").strip()
+            name = (e.get("name") or "").strip()
+            eco = (e.get("eco") or "").strip()[:16]
+            if not play or not name:
+                continue
+            if len(play) > 400 or len(name) > 120:
+                continue
+            items.append((user["id"], color, play, name, eco))
+
+    with _db() as conn:
+        conn.execute("DELETE FROM user_repertoire WHERE user_id = ?", (user["id"],))
+        if items:
+            conn.executemany(
+                "INSERT OR REPLACE INTO user_repertoire "
+                "(user_id, color, play, name, eco) VALUES (?, ?, ?, ?, ?)",
+                items,
+            )
+    return jsonify(_repertoire_payload(user["id"]))
 
 
 @app.put("/api/me")
