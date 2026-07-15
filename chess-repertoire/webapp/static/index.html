@@ -1237,7 +1237,7 @@ async function fetchEval(fen) {
       enginePanel.classList.remove("visible");
       return;
     }
-    const data = await resp.json();
+    const data = await readJson(resp);
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     engineAvailable = true;
     evalCache.set(fen, data);
@@ -1955,6 +1955,24 @@ const meBtn = document.getElementById("analyze-me-btn");
 
 let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" report)
 
+async function readJson(resp) {
+  const text = await resp.text();
+  if (!text) {
+    throw new Error(
+      resp.status
+        ? `Empty response (HTTP ${resp.status}). The API may still be waking up — try again.`
+        : "Empty response from server. Try again."
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(
+      `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`
+    );
+  }
+}
+
 async function runReport(url, fetchingMsg) {
   const tcs = [...document.querySelectorAll("#tc-group input:checked")].map(c => c.value);
   if (!tcs.length) { statusEl.textContent = "Pick at least one time control."; statusEl.className = "error"; return; }
@@ -1965,7 +1983,7 @@ async function runReport(url, fetchingMsg) {
   statusEl.textContent = fetchingMsg;
   try {
     const resp = await fetch(`${url}&time_classes=${tcs.join(",")}${rangeQuery()}`);
-    const data = await resp.json();
+    const data = await readJson(resp);
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     state.report = data;
     let msg = `${data.analyzed_games} rated games analyzed (${

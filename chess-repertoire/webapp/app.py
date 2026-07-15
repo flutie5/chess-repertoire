@@ -585,7 +585,10 @@ def report():
         if source in ("lichess", "both"):
             games_with_moves.extend(_load_lichess_games(username, months))
     except (fetch.ChessComError, lichess.LichessError) as e:
-        return jsonify({"error": str(e)}), 404
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        # Never return an HTML 500 — the frontend always expects JSON.
+        return jsonify({"error": f"Failed to fetch games: {e}"}), 500
 
     sources = ["chesscom", "lichess"] if source == "both" else [source]
     return jsonify(_build_report(games_with_moves, username, months,
@@ -632,10 +635,13 @@ def report_me():
         msg = "; ".join(errors) if errors else "No games found for your linked accounts."
         return jsonify({"error": msg}), 404
 
-    label_parts = [p for p in (cc_name, li_name) if p]
-    label = label_parts[0] if len(set(label_parts)) == 1 else " + ".join(label_parts)
-    payload = _build_report(games_with_moves, label, months, time_classes,
-                            sources, since_ts=since_ts, until_ts=until_ts)
+    try:
+        label_parts = [p for p in (cc_name, li_name) if p]
+        label = label_parts[0] if len(set(label_parts)) == 1 else " + ".join(label_parts)
+        payload = _build_report(games_with_moves, label, months, time_classes,
+                                sources, since_ts=since_ts, until_ts=until_ts)
+    except Exception as e:
+        return jsonify({"error": f"Failed to build report: {e}"}), 500
     if errors:
         payload["warnings"] = errors
     return jsonify(payload)

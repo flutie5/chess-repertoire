@@ -14,8 +14,13 @@ from pathlib import Path
 import requests
 
 BASE = "https://api.chess.com/pub"
-DEFAULT_UA = "repertoire-builder (personal opening analysis script)"
+DEFAULT_UA = (
+    "ChessRepertoireExplorer/1.0 "
+    "(https://github.com/flutie5/chess-repertoire; personal opening analysis)"
+)
 REQUEST_DELAY_SECONDS = 0.5  # be polite; chess.com asks for serial access
+REQUEST_TIMEOUT = 45
+REQUEST_RETRIES = 3
 
 
 class ChessComError(RuntimeError):
@@ -23,17 +28,36 @@ class ChessComError(RuntimeError):
 
 
 def _get(url: str, user_agent: str) -> dict:
-    resp = requests.get(url, headers={"User-Agent": user_agent}, timeout=30)
-    if resp.status_code == 404:
-        raise ChessComError(
-            f"404 from chess.com for {url} — check the username spelling."
-        )
-    if resp.status_code == 429:
-        # Rate limited: back off once and retry.
-        time.sleep(5)
-        resp = requests.get(url, headers={"User-Agent": user_agent}, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    """GET JSON from chess.com with retries; always raise ChessComError on failure."""
+    last_err: Exception | None = None
+    for attempt in range(REQUEST_RETRIES):
+        try:
+            resp = requests.get(
+                url, headers={"User-Agent": user_agent}, timeout=REQUEST_TIMEOUT
+            )
+            if resp.status_code == 404:
+                raise ChessComError(
+                    f"Chess.com username not found — check the spelling."
+                )
+            if resp.status_code == 429:
+                time.sleep(5 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except ValueError as e:
+                raise ChessComError("Chess.com returned invalid JSON.") from e
+        except ChessComError:
+            raise
+        except requests.Timeout as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+        except requests.RequestException as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    raise ChessComError(
+        "Chess.com timed out or is unreachable. Wait a few seconds and try again."
+    ) from last_err
 
 
 def list_archives(username: str, user_agent: str = DEFAULT_UA) -> list[str]:
