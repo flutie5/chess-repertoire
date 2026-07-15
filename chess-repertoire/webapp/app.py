@@ -302,13 +302,15 @@ def _variation_payload(name: str, count: int, move_lists: list[list[str]],
 MAX_GAMES_PER_OPENING = 200
 
 
-def _game_entry(g, san: list[str]) -> dict:
+def _game_entry(g, san: list[str], player_username: str = "") -> dict:
     date = ""
     if g.end_time:
         date = datetime.fromtimestamp(g.end_time, tz=timezone.utc).strftime("%Y-%m-%d")
     return {
         "opponent": g.opponent,
         "opponent_rating": g.opponent_rating,
+        "my_username": player_username or "",
+        "my_rating": g.my_rating,
         "result": g.result,
         "date": date,
         "time_class": g.time_class,
@@ -319,7 +321,7 @@ def _game_entry(g, san: list[str]) -> dict:
     }
 
 
-def _color_payload(report, games_with_moves):
+def _color_payload(report, games_with_moves, player_username: str = ""):
     """Serialize a ColorReport, attaching main lines to each variation."""
     # variation full name -> list of move lists (for this color's games)
     by_variation: dict[str, list[list[str]]] = {}
@@ -354,7 +356,7 @@ def _color_payload(report, games_with_moves):
             "score": round(op.score, 1),
             "ecos": sorted(op.ecos),
             "variations": variations,
-            "game_list": [_game_entry(g, mv)
+            "game_list": [_game_entry(g, mv, player_username)
                           for g, mv in family_games[:MAX_GAMES_PER_OPENING]],
         })
     return {
@@ -646,8 +648,8 @@ def _build_report(games_with_moves, username_label: str, months: int,
                   .strftime("%Y-%m-%d") if until_ts is not None else None),
         "time_classes": sorted(time_classes) if time_classes else "all",
         "analyzed_games": len(filtered_pairs),
-        "white": _color_payload(white, filtered_pairs),
-        "black": _color_payload(black, filtered_pairs),
+        "white": _color_payload(white, filtered_pairs, username_label),
+        "black": _color_payload(black, filtered_pairs, username_label),
         "priorities": [
             {
                 "color": p.color,

@@ -119,13 +119,46 @@
     text-shadow: 0 1px 2px rgba(0,0,0,.55);
   }
   .material-tray .adv.empty { visibility: hidden; }
+  .player-strip {
+    display: flex; align-items: flex-start; gap: 10px;
+    width: calc(var(--board-px) + 30px);
+    padding: 2px 4px 4px;
+    min-height: 28px;
+  }
+  .player-strip.idle .player-avatar { display: none; }
+  .player-strip.idle .player-id { display: none; }
+  .player-avatar {
+    flex: none; width: 36px; height: 36px; border-radius: 4px;
+    background: #4a4a4a
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23999'%3E%3Cpath d='M12 2c-1.5 2.5-3 4.2-3 6.5 0 1.5.8 2.8 2 3.4v.6c-3.5.5-6 2.4-6 5.5h14c0-3.1-2.5-5-6-5.5v-.6c1.2-.6 2-1.9 2-3.4C15 6.2 13.5 4.5 12 2z'/%3E%3C/svg%3E")
+      center 60% / 70% no-repeat;
+  }
+  .player-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .player-id {
+    display: flex; align-items: baseline; gap: 4px;
+    line-height: 1.2; min-height: 18px;
+  }
+  .player-name {
+    font-size: 14px; font-weight: 700; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-rating {
+    font-size: 13px; font-weight: 500; color: var(--text-muted);
+    flex: none; font-variant-numeric: tabular-nums;
+  }
+  .player-strip .material-tray {
+    width: auto; min-height: 22px; padding: 0;
+  }
+  .player-strip .material-tray .caps img {
+    width: 20px; height: 20px; margin-left: -5px;
+  }
   .piece-bank {
     display: none; flex-direction: column; gap: 6px;
     width: calc(var(--board-px) + 30px);
     padding: 4px 2px;
   }
   body.edit-mode .piece-bank { display: flex; }
-  body.edit-mode .material-tray { display: none; }
+  body.edit-mode .player-strip { display: none; }
   body.edit-mode .edit-tools { display: flex; }
   .piece-bank .bank-row {
     display: flex; align-items: center; justify-content: center; gap: 4px;
@@ -808,8 +841,17 @@
   <section class="board-panel">
     <div id="line-title">Analysis board</div>
     <div class="piece-bank" id="bank-top" aria-label="Piece tray (top)"></div>
-    <div class="material-tray" id="material-top" aria-label="Captured material (top)">
-      <div class="caps"></div><span class="adv empty"></span>
+    <div class="player-strip idle" id="player-top">
+      <div class="player-avatar" aria-hidden="true"></div>
+      <div class="player-info">
+        <div class="player-id">
+          <span class="player-name"></span>
+          <span class="player-rating"></span>
+        </div>
+        <div class="material-tray" id="material-top" aria-label="Captured material (top)">
+          <div class="caps"></div><span class="adv empty"></span>
+        </div>
+      </div>
     </div>
     <div class="board-row">
       <div id="evalbar"><div class="tick"></div><div class="white-fill"></div></div>
@@ -818,8 +860,17 @@
         <div id="board-resize" title="Drag to resize board"></div>
       </div>
     </div>
-    <div class="material-tray" id="material-bot" aria-label="Captured material (bottom)">
-      <div class="caps"></div><span class="adv empty"></span>
+    <div class="player-strip idle" id="player-bot">
+      <div class="player-avatar" aria-hidden="true"></div>
+      <div class="player-info">
+        <div class="player-id">
+          <span class="player-name"></span>
+          <span class="player-rating"></span>
+        </div>
+        <div class="material-tray" id="material-bot" aria-label="Captured material (bottom)">
+          <div class="caps"></div><span class="adv empty"></span>
+        </div>
+      </div>
     </div>
     <div class="piece-bank" id="bank-bot" aria-label="Piece tray (bottom)"></div>
     <div class="edit-tools" id="edit-tools">
@@ -937,6 +988,7 @@ const state = {
   moveFlags: [],            // opening blunder/mistake flags for current game
   lastOpeningName: null,    // deepest opening name recognized for current line
   editMode: false,         // free-place position editor
+  boardPlayers: null,      // { white:{name,rating}, black:{name,rating} } when a game is loaded
   repertoireOpen: false,
   repColor: "white",       // My Repertoire White/Black pill
   myRepertoire: { white: [], black: [] },
@@ -1263,6 +1315,60 @@ function renderMaterial() {
     renderMaterialTray(top, whiteTook, "b", diff > 0 ? diff : 0);
     renderMaterialTray(bot, blackTook, "w", diff < 0 ? -diff : 0);
   }
+  renderPlayerStrips();
+}
+
+function fillPlayerStrip(el, player) {
+  if (!el) return;
+  const nameEl = el.querySelector(".player-name");
+  const ratingEl = el.querySelector(".player-rating");
+  if (!player || !player.name) {
+    el.classList.add("idle");
+    if (nameEl) nameEl.textContent = "";
+    if (ratingEl) ratingEl.textContent = "";
+    return;
+  }
+  el.classList.remove("idle");
+  nameEl.textContent = player.name;
+  ratingEl.textContent = player.rating ? `(${player.rating})` : "";
+}
+
+function renderPlayerStrips() {
+  const top = document.getElementById("player-top");
+  const bot = document.getElementById("player-bot");
+  const players = state.boardPlayers;
+  if (!players) {
+    fillPlayerStrip(top, null);
+    fillPlayerStrip(bot, null);
+    return;
+  }
+  // Top strip = color sitting at the top of the board
+  if (state.orientation === "white") {
+    fillPlayerStrip(top, players.black);
+    fillPlayerStrip(bot, players.white);
+  } else {
+    fillPlayerStrip(top, players.white);
+    fillPlayerStrip(bot, players.black);
+  }
+}
+
+function setBoardPlayersFromGame(g) {
+  if (!g) {
+    state.boardPlayers = null;
+    return;
+  }
+  const meName = (g.my_username || state.report?.username ||
+    document.getElementById("username")?.value || "").trim() || "You";
+  const me = { name: meName, rating: g.my_rating || 0 };
+  const opp = { name: g.opponent || "Opponent", rating: g.opponent_rating || 0 };
+  state.boardPlayers = g.color === "black"
+    ? { white: opp, black: me }
+    : { white: me, black: opp };
+}
+
+function clearBoardPlayers() {
+  state.boardPlayers = null;
+  renderPlayerStrips();
 }
 
 function refreshBoard() {
@@ -1672,6 +1778,7 @@ function resetGame(title) {
   state.ply = 0;
   state.moveFlags = [];
   state.lastOpeningName = null;
+  clearBoardPlayers();
   // Title is set by scheduleOpeningTitle() inside refreshBoard().
   clearGamesFilters();
   refreshBoard();
@@ -1788,6 +1895,7 @@ function loadLine(line, openingName) {
   state.ply = 0;
   state.moveFlags = [];
   state.lastOpeningName = line.name || null;
+  clearBoardPlayers();
   // Provisional title; scheduleOpeningTitle() refines it move-by-move.
   titleEl.textContent = line.name || "Starting position";
   clearGamesFilters();
@@ -1816,6 +1924,7 @@ function loadGameReplay(g) {
   state.moveFlags = g._flags || [];
   state.lastOpeningName = g.variation || null;
   titleEl.textContent = g.variation || "Starting position";
+  setBoardPlayersFromGame(g);
   // Keep any variation filter/highlight: the user is browsing that list.
   animateLine(GAME_PREVIEW_PLIES);
 }
