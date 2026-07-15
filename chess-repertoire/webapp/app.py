@@ -10,6 +10,9 @@ for every variation.
 
 GET /api/eval?fen=... returns a Stockfish evaluation of the position.
 
+GET /api/opening?play=e2e4,e7e5,... returns the opening name/eco for a UCI
+move sequence (proxied from the Lichess opening explorer, cached).
+
 POST /api/scan-blunders scans opening moves in a batch of games for
 inaccuracies/mistakes/blunders and returns per-game flags plus repeated
 patterns within the same variation.
@@ -35,7 +38,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from repertoire import analyze, classify, fetch, lichess, moves, parse  # noqa: E402
+from repertoire import analyze, classify, fetch, lichess, moves, openings, parse  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP_DIR = Path(__file__).resolve().parent
@@ -169,6 +172,7 @@ _engine_lock = threading.Lock()
 _eval_cache: dict[str, dict] = {}
 _scan_eval_cache: dict[str, dict] = {}  # shallower depth cache for blunder scans
 _scan_cache: dict[str, dict] = {}       # game-key -> scan result
+_opening_cache: dict[str, dict] = {}    # UCI play string -> {name, eco}
 
 
 def _engine_path() -> Path | None:
@@ -347,6 +351,20 @@ def evaluate():
         "turn": "white" if board.turn == chess.WHITE else "black",
     }
     _eval_cache[key] = result
+    return jsonify(result)
+
+
+@app.get("/api/opening")
+def opening_lookup():
+    """Resolve an opening name for a UCI move sequence (comma-separated).
+
+    Uses the local ECO book (longest prefix match). No external API required.
+    """
+    play = (request.args.get("play") or "").strip()
+    result = openings.lookup(play)
+    # Also cache under _opening_cache for identical requests.
+    if play:
+        _opening_cache[play] = result
     return jsonify(result)
 
 

@@ -727,6 +727,7 @@ const state = {
   fens: [START_FEN],        // fens[i] = position after i plies
   moves: [],                // verbose chess.js move objects
   moveFlags: [],            // opening blunder/mistake flags for current game
+  lastOpeningName: null,    // deepest opening name recognized for current line
 };
 
 /* ---------- game model (chess.js) ---------- */
@@ -940,8 +941,87 @@ function refreshBoard() {
   markMovablePieces();
   renderMoveList();
   renderMaterial();
+  scheduleOpeningTitle();
   scheduleEval();
 }
+
+/* ---------- dynamic opening title ---------- */
+
+let openingBook = null;          // Map playUci -> {name,eco}
+let openingBookLoading = null;
+
+function playUciToPly(ply) {
+  return state.moves.slice(0, ply)
+    .map(m => m.from + m.to + (m.promotion || ""))
+    .join(",");
+}
+
+function setBoardTitle(text) {
+  const el = document.getElementById("line-title");
+  if (el) el.textContent = text;
+}
+
+function longestOpeningMatch(play) {
+  if (!play || !openingBook) return null;
+  const parts = play.split(",");
+  for (let i = parts.length; i >= 1; i--) {
+    const key = parts.slice(0, i).join(",");
+    const hit = openingBook[key];
+    if (hit && hit.name) return { ...hit, matched_ply: i, ply: parts.length };
+  }
+  return null;
+}
+
+async function ensureOpeningBook() {
+  if (openingBook) return openingBook;
+  if (openingBookLoading) return openingBookLoading;
+  openingBookLoading = fetch("/openings.json")
+    .then(r => r.json())
+    .then(data => { openingBook = data || {}; return openingBook; })
+    .catch(() => { openingBook = {}; return openingBook; })
+    .finally(() => { openingBookLoading = null; });
+  return openingBookLoading;
+}
+
+function applyOpeningResult(data, ply) {
+  if (data && data.name) {
+    state.lastOpeningName = data.eco ? `${data.name} (${data.eco})` : data.name;
+    setBoardTitle(state.lastOpeningName);
+    return;
+  }
+  if (state.lastOpeningName) {
+    setBoardTitle(state.lastOpeningName);
+  } else {
+    setBoardTitle(ply > 0 ? `Position after ${Math.ceil(ply / 2)} moves` : "Starting position");
+  }
+}
+
+function scheduleOpeningTitle() {
+  const ply = state.ply;
+  if (ply === 0) {
+    state.lastOpeningName = null;
+    setBoardTitle("Starting position");
+    return;
+  }
+  const play = playUciToPly(ply);
+
+  // Fast path: local ECO book (instant, updates every move).
+  if (openingBook) {
+    applyOpeningResult(longestOpeningMatch(play), ply);
+    return;
+  }
+
+  // Book still loading — provisional title, then refine.
+  if (state.lastOpeningName) setBoardTitle(state.lastOpeningName);
+  ensureOpeningBook().then(() => {
+    if (state.ply !== ply) return;
+    applyOpeningResult(longestOpeningMatch(play), ply);
+  });
+}
+
+// Kick off book download as soon as the page loads.
+ensureOpeningBook();
+
 
 /* ---------- Stockfish evaluation ---------- */
 
@@ -1153,7 +1233,8 @@ function resetGame(title) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
-  titleEl.textContent = title || "Analysis board";
+  state.lastOpeningName = null;
+  // Title is set by scheduleOpeningTitle() inside refreshBoard().
   clearGamesFilters();
   refreshBoard();
 }
@@ -1260,7 +1341,9 @@ function loadLine(line, openingName) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
-  titleEl.textContent = line.name;
+  state.lastOpeningName = line.name || null;
+  // Provisional title; scheduleOpeningTitle() refines it move-by-move.
+  titleEl.textContent = line.name || "Starting position";
   clearGamesFilters();
   const el = document.querySelector(`.line[data-key="${CSS.escape(openingName + "||" + line.name)}"]`);
   if (el) {
@@ -1282,8 +1365,8 @@ function loadGameReplay(g) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = g._flags || [];
-  const rating = g.opponent_rating ? ` (${g.opponent_rating})` : "";
-  titleEl.textContent = g.opponent + rating + (g.date ? " \u2014 " + g.date : "");
+  state.lastOpeningName = g.variation || null;
+  titleEl.textContent = g.variation || "Starting position";
   // Keep any variation filter/highlight: the user is browsing that list.
   animateLine(GAME_PREVIEW_PLIES);
 }

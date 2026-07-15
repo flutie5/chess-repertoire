@@ -25,6 +25,9 @@ package.json
 # Engine binaries (download via scripts/download_stockfish.sh on deploy)
 engine/
 
+# Opening-book source TSVs (generated openings.json is committed)
+repertoire/data/*.tsv
+
 # Local verification / Playwright artifacts
 screenshots/
 verify-screens/
