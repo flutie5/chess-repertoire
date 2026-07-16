@@ -6,7 +6,7 @@
 <title>Chess Repertoire Explorer</title>
 <link rel="icon" href="data:,">
 <style>
-  :root {
+  :root, html[data-board-theme="green"] {
     /* Surfaces */
     --bg-page: #312e2b;
     --bg-card: #262421;
@@ -14,12 +14,16 @@
     --bg-input: #1f1d1b;
     --border-subtle: rgba(255, 255, 255, 0.08);
 
-    /* Brand green */
+    /* Brand / accent (name kept as --green for existing CSS) */
     --green: #81b64c;
     --green-hover: #8fc25b;
     --green-shadow: #45753c;
+    --green-soft: rgba(129, 182, 76, 0.18);
+    --green-soft-2: rgba(129, 182, 76, 0.14);
+    --green-soft-3: rgba(129, 182, 76, 0.35);
+    --green-soft-4: rgba(129, 182, 76, 0.45);
 
-    /* Board-derived accents */
+    /* Board */
     --board-light: #ebecd0;
     --board-dark: #779556;
 
@@ -38,6 +42,39 @@
     --radius-sm: 6px;
 
     --hl: rgba(255, 255, 51, 0.5);   /* last-move highlight, chess.com yellow */
+  }
+  html[data-board-theme="blue"] {
+    --green: #4d8fd9;
+    --green-hover: #63a0e3;
+    --green-shadow: #2a5f9a;
+    --green-soft: rgba(77, 143, 217, 0.2);
+    --green-soft-2: rgba(77, 143, 217, 0.14);
+    --green-soft-3: rgba(77, 143, 217, 0.4);
+    --green-soft-4: rgba(77, 143, 217, 0.5);
+    --board-light: #dee3ef;
+    --board-dark: #4b7399;
+  }
+  html[data-board-theme="pink"] {
+    --green: #d46a9a;
+    --green-hover: #e07aad;
+    --green-shadow: #8a3d62;
+    --green-soft: rgba(212, 106, 154, 0.2);
+    --green-soft-2: rgba(212, 106, 154, 0.14);
+    --green-soft-3: rgba(212, 106, 154, 0.4);
+    --green-soft-4: rgba(212, 106, 154, 0.5);
+    --board-light: #f3e4ec;
+    --board-dark: #b86b8f;
+  }
+  html[data-board-theme="grey"] {
+    --green: #9a9a9a;
+    --green-hover: #b0b0b0;
+    --green-shadow: #555555;
+    --green-soft: rgba(154, 154, 154, 0.22);
+    --green-soft-2: rgba(154, 154, 154, 0.16);
+    --green-soft-3: rgba(154, 154, 154, 0.4);
+    --green-soft-4: rgba(154, 154, 154, 0.5);
+    --board-light: #e6e6e6;
+    --board-dark: #6e6e6e;
   }
   * { box-sizing: border-box; }
   body {
@@ -184,7 +221,7 @@
   }
   .piece-bank .bank-piece:hover { background: var(--bg-card-hover); }
   .piece-bank .bank-piece.selected {
-    border-color: var(--green); background: rgba(129, 182, 76, 0.18);
+    border-color: var(--green); background: var(--green-soft);
   }
   .piece-bank .bank-piece img {
     width: 100%; height: 100%; pointer-events: none; display: block;
@@ -575,7 +612,7 @@
     padding: 8px 12px 8px 22px; cursor: pointer; font-size: 13px;
   }
   .line:hover { background: var(--bg-card-hover); }
-  .line.active { background: rgba(129,182,76,.14); box-shadow: inset 3px 0 0 var(--green); }
+  .line.active { background: var(--green-soft-2); box-shadow: inset 3px 0 0 var(--green); }
   .line .lname { flex: 1; min-width: 0; color: var(--text-secondary); }
   .line.active .lname { color: var(--text-primary); }
   .line .lgames { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
@@ -785,8 +822,35 @@
     background: var(--bg-input); color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
   }
-  .profile-pill.ok { color: var(--green); border-color: rgba(129,182,76,.45); }
+  .profile-pill.ok { color: var(--green); border-color: var(--green-soft-4); }
   .profile-pill.miss { color: var(--warn-orange); border-color: rgba(229,143,42,.4); }
+  .theme-swatches {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  }
+  .theme-swatch {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); padding: 10px 8px; cursor: pointer;
+    color: var(--text-secondary); font-size: 12px; font-weight: 700;
+  }
+  .theme-swatch:hover { border-color: var(--green); color: var(--text-primary); }
+  .theme-swatch.active {
+    border-color: var(--green); color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--green);
+  }
+  .theme-swatch .preview {
+    width: 44px; height: 44px; border-radius: 6px; overflow: hidden;
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  .theme-swatch .preview i:nth-child(1),
+  .theme-swatch .preview i:nth-child(4) { background: var(--p-light); }
+  .theme-swatch .preview i:nth-child(2),
+  .theme-swatch .preview i:nth-child(3) { background: var(--p-dark); }
+  .theme-swatch[data-theme="green"] { --p-light: #ebecd0; --p-dark: #779556; }
+  .theme-swatch[data-theme="blue"]  { --p-light: #dee3ef; --p-dark: #4b7399; }
+  .theme-swatch[data-theme="pink"]  { --p-light: #f3e4ec; --p-dark: #b86b8f; }
+  .theme-swatch[data-theme="grey"]  { --p-light: #e6e6e6; --p-dark: #6e6e6e; }
 
   /* ---- my repertoire ---- */
   #my-repertoire-btn {
@@ -851,8 +915,8 @@
   }
   .rep-line:hover { background: var(--bg-card-hover); }
   .rep-line.active-preview {
-    background: rgba(129, 182, 76, 0.14);
-    outline: 1px solid rgba(129, 182, 76, 0.35);
+    background: var(--green-soft-2);
+    outline: 1px solid var(--green-soft-3);
   }
   .rep-line .eco {
     font-size: 10px; color: var(--text-muted); font-weight: 700;
@@ -866,7 +930,7 @@
   }
   .rep-line button:hover { border-color: var(--green); color: var(--text-primary); }
   .rep-line button.in-rep {
-    background: rgba(129,182,76,.2); border-color: var(--green); color: var(--green);
+    background: var(--green-soft); border-color: var(--green); color: var(--green);
   }
   .rep-line.inactive button { pointer-events: none; }
   #repertoire-practice {
@@ -990,6 +1054,29 @@
     <div class="modal-actions">
       <button class="primary" id="profile-save-btn">Save profile</button>
       <button class="ghost" id="profile-analyze-btn">Analyze my games</button>
+    </div>
+  </div>
+
+  <div class="profile-card" id="profile-theme-card">
+    <h2>Board color</h2>
+    <p class="hint">Changes the dark squares and the accent color across the app. Green is the default.</p>
+    <div class="theme-swatches" id="theme-swatches" role="radiogroup" aria-label="Board color">
+      <button type="button" class="theme-swatch active" data-theme="green" aria-pressed="true">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Green
+      </button>
+      <button type="button" class="theme-swatch" data-theme="blue" aria-pressed="false">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Blue
+      </button>
+      <button type="button" class="theme-swatch" data-theme="pink" aria-pressed="false">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Pink
+      </button>
+      <button type="button" class="theme-swatch" data-theme="grey" aria-pressed="false">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Grey
+      </button>
     </div>
   </div>
 
@@ -1243,6 +1330,40 @@ function makeUserMove(from, to, promotion) {
   return true;
 }
 
+/* ---------- undo (edit actions / take back one move) ---------- */
+
+let editUndoStack = [];
+
+function clearEditUndo() {
+  editUndoStack = [];
+}
+
+function pushEditUndo() {
+  if (!state.editMode) return;
+  editUndoStack.push(currentFen());
+  if (editUndoStack.length > 120) editUndoStack.shift();
+}
+
+function isCustomOrEditPosition() {
+  return !!(state.editMode || freeFen || gameRootFen !== START_FEN);
+}
+
+/** One step back: undo editor action, or take back the move that led here. */
+function undoLastAction() {
+  cancelLineAnim(false);
+  if (state.editMode || (freeFen && !state.sans.length)) {
+    if (!editUndoStack.length) return false;
+    const fen = editUndoStack.pop();
+    setCustomFen(fen, { keepEdit: true });
+    return true;
+  }
+  if (state.ply <= 0) return false;
+  state.ply -= 1;
+  truncateToPly();
+  refreshBoard();
+  return true;
+}
+
 /** Normalize to a playable / evaluable FEN (clear castling/ep for editor roots). */
 function normalizeEditFen(placement, turn) {
   const t = turn === "b" ? "b" : "w";
@@ -1313,6 +1434,7 @@ function fenFromBoardMap(map, turn) {
 }
 
 function placePieceOn(sq, piece) {
+  pushEditUndo();
   const map = boardMapFromFen(currentFen());
   // Only one king per side
   if (piece === "K" || piece === "k") {
@@ -1327,6 +1449,7 @@ function placePieceOn(sq, piece) {
 function removePieceAt(sq) {
   const map = boardMapFromFen(currentFen());
   if (!map[sq]) return;
+  pushEditUndo();
   delete map[sq];
   setCustomFen(fenFromBoardMap(map));
 }
@@ -1336,6 +1459,7 @@ function relocatePiece(from, to) {
   const map = boardMapFromFen(currentFen());
   const pc = map[from];
   if (!pc) return;
+  pushEditUndo();
   delete map[from];
   map[to] = pc;
   // After a board move in the editor, flip side-to-move (White ↔ Black).
@@ -1347,6 +1471,9 @@ function relocatePiece(from, to) {
 
 function setSideToMove(turn) {
   const parts = currentFen().split(/\s+/);
+  const cur = parts[1] === "b" ? "b" : "w";
+  if (cur === turn) return;
+  pushEditUndo();
   setCustomFen(normalizeEditFen(parts[0], turn));
   updateEditTurnBtns();
 }
@@ -1847,6 +1974,7 @@ function setEditMode(on) {
   palettePiece = null;
   syncPaletteSelection();
   clearSelection();
+  clearEditUndo();
   // Collapse move history into a single custom root so free placement is the new start.
   setCustomFen(currentFen());
   if (state.editMode) updateEditTurnBtns();
@@ -1855,8 +1983,10 @@ function setEditMode(on) {
 editPosBtn.onclick = () => setEditMode(!state.editMode);
 document.getElementById("edit-turn-w").onclick = () => setSideToMove("w");
 document.getElementById("edit-turn-b").onclick = () => setSideToMove("b");
-document.getElementById("edit-clear").onclick = () =>
+document.getElementById("edit-clear").onclick = () => {
+  pushEditUndo();
   setCustomFen(normalizeEditFen("8/8/8/8/8/8/8/8", currentFen().split(/\s+/)[1] || "w"));
+};
 
 document.querySelectorAll(".piece-bank").forEach(bank => {
   bank.addEventListener("click", e => {
@@ -1915,7 +2045,11 @@ function drawBestArrow(from, to) {
   const tipX = b.x - ux * margin, tipY = b.y - uy * margin;
   const baseX = tipX - ux * headLen, baseY = tipY - uy * headLen;
   const px = -uy, py = ux;
-  const green = "rgba(129, 182, 76, 0.8)";
+  const accent = (getComputedStyle(document.documentElement)
+    .getPropertyValue("--green").trim() || "#81b64c");
+  const green = accent.startsWith("#") && accent.length === 7
+    ? `rgba(${parseInt(accent.slice(1, 3), 16)}, ${parseInt(accent.slice(3, 5), 16)}, ${parseInt(accent.slice(5, 7), 16)}, 0.85)`
+    : accent;
 
   const shaft = document.createElementNS("http://www.w3.org/2000/svg", "line");
   shaft.setAttribute("x1", x1); shaft.setAttribute("y1", y1);
@@ -2225,9 +2359,26 @@ function initSidebarResize() {
 initSidebarResize();
 
 document.addEventListener("keydown", e => {
-  if (e.target.tagName === "INPUT") return;
-  if (e.key === "ArrowLeft") { e.preventDefault(); setPly(state.ply - 1); }
-  if (e.key === "ArrowRight") { e.preventDefault(); setPly(state.ply + 1); }
+  const tag = (e.target.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+
+  // Delete / Backspace always take back one action.
+  // ArrowLeft also undoes in the editor or a custom-root analysis.
+  if (e.key === "Backspace" || e.key === "Delete") {
+    e.preventDefault();
+    undoLastAction();
+    return;
+  }
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    if (isCustomOrEditPosition()) undoLastAction();
+    else setPly(state.ply - 1);
+    return;
+  }
+  if (e.key === "ArrowRight") {
+    e.preventDefault();
+    setPly(state.ply + 1);
+  }
 });
 
 /* ---------- line replay animation ---------- */
@@ -4182,6 +4333,47 @@ document.getElementById("rep-difficulty").onchange = e => {
 
 /* ---------- init ---------- */
 
+const BOARD_THEME_LS = "boardTheme";
+const BOARD_THEMES = ["green", "blue", "pink", "grey"];
+
+function syncThemeSwatches(theme) {
+  document.querySelectorAll("#theme-swatches .theme-swatch").forEach(btn => {
+    const on = btn.dataset.theme === theme;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function applyBoardTheme(theme, { persist = true } = {}) {
+  const t = BOARD_THEMES.includes(theme) ? theme : "green";
+  document.documentElement.setAttribute("data-board-theme", t);
+  if (persist) {
+    try { localStorage.setItem(BOARD_THEME_LS, t); } catch (e) { /* ignore */ }
+  }
+  syncThemeSwatches(t);
+  if (typeof refreshBoard === "function" && document.getElementById("board")) {
+    try { refreshBoard(); } catch (e) { /* not ready yet */ }
+  }
+}
+
+function initBoardTheme() {
+  let saved = "green";
+  try {
+    const v = localStorage.getItem(BOARD_THEME_LS);
+    if (BOARD_THEMES.includes(v)) saved = v;
+  } catch (e) { /* ignore */ }
+  applyBoardTheme(saved, { persist: false });
+  const host = document.getElementById("theme-swatches");
+  if (host) {
+    host.addEventListener("click", e => {
+      const btn = e.target.closest(".theme-swatch[data-theme]");
+      if (!btn) return;
+      applyBoardTheme(btn.dataset.theme);
+    });
+  }
+}
+
+initBoardTheme();
 initRecentUsernames();
 loadRepertoireFromLocal();
 rebuildDerived();
