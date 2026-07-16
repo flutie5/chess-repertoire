@@ -1872,14 +1872,17 @@ async function fetchEval(fen) {
       labelEl.textContent = "Stockfish \u2014 " + (data.error || "engine unavailable");
       return;
     }
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    if (!resp.ok) {
+      engineAvailable = null;
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
     engineAvailable = true;
     evalCache.set(fen, data);
     if (token === evalToken && fen === currentFen()) renderEval(data);
   } catch (e) {
     if (token === evalToken) {
       enginePanel.classList.add("visible");
-      labelEl.textContent = "Stockfish \u2014 " + e.message;
+      labelEl.textContent = "Stockfish \u2014 " + (e.message || "engine unavailable");
     }
   }
 }
@@ -3008,13 +3011,17 @@ async function readJson(resp) {
   try {
     return JSON.parse(text);
   } catch (e) {
-    const err = new Error(
-      resp.status === 405
-        ? "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again."
-        : looksLikeProxyMiss(resp.status, text)
-          ? "API proxy returned 404. Retrying via the Render backend…"
-          : `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`
-    );
+    let message;
+    if (resp.status === 405) {
+      message = "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again.";
+    } else if (looksLikeProxyMiss(resp.status, text)) {
+      message = "API proxy returned 404. Retrying via the Render backend…";
+    } else if (resp.status === 500) {
+      message = "Engine server error (HTTP 500). If this persists after a Render redeploy, check /api/engine-status.";
+    } else {
+      message = `Server returned non-JSON (HTTP ${resp.status}). Try again in a moment.`;
+    }
+    const err = new Error(message);
     err.httpStatus = resp.status;
     err.rawBody = text;
     err.isProxyMiss = looksLikeProxyMiss(resp.status, text);

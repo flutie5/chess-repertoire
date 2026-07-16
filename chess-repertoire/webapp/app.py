@@ -35,6 +35,7 @@ from pathlib import Path
 import chess
 import chess.engine
 from flask import Flask, jsonify, request, send_from_directory, session
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -118,6 +119,39 @@ def _cors_netlify_fallback(resp):
 @app.route("/api/<path:_any>", methods=["OPTIONS"])
 def _cors_preflight(_any: str):
     return ("", 204)
+
+
+@app.errorhandler(500)
+def _api_500(exc):
+    """Always JSON on /api/* — never Flask's HTML 500 page."""
+    if not request.path.startswith("/api/"):
+        return exc
+    original = getattr(exc, "original_exception", None)
+    detail = str(original) if original else (getattr(exc, "description", None) or "internal server error")
+    print(f"WARNING: API 500 on {request.path}: {detail}", flush=True)
+    return jsonify({"error": detail}), 500
+
+
+@app.errorhandler(HTTPException)
+def _api_http_error(exc: HTTPException):
+    """Return JSON for API HTTP errors (avoids HTML error pages)."""
+    if not request.path.startswith("/api/"):
+        return exc
+    if exc.code == 500:
+        return _api_500(exc)
+    return jsonify({"error": exc.description or exc.name}), exc.code or 500
+
+
+@app.errorhandler(Exception)
+def _api_unhandled_error(exc: Exception):
+    """Catch-all so /api/* never returns non-JSON on unexpected failures."""
+    if isinstance(exc, HTTPException):
+        return _api_http_error(exc)
+    if not request.path.startswith("/api/"):
+        return ("Internal Server Error", 500)
+    print(f"WARNING: unhandled API error on {request.path}: {exc}", flush=True)
+    return jsonify({"error": f"server error: {exc}"}), 500
+
 
 # ---- Accounts (SQLite + signed session cookie) ----
 
@@ -259,14 +293,30 @@ def _engine_path() -> Path | None:
     return None
 
 
+def _configure_engine(engine: chess.engine.SimpleEngine) -> None:
+    """Free-tier-friendly defaults: one thread, small hash, full strength."""
+    try:
+        engine.configure({
+            "Threads": 1,
+            "Hash": 16,
+            "UCI_LimitStrength": False,
+            "Skill Level": 20,
+        })
+    except Exception as exc:
+        print(f"WARNING: Stockfish configure failed: {exc}", flush=True)
+
+
 def _get_engine() -> chess.engine.SimpleEngine | None:
     global _engine
     if _engine is None:
         path = _engine_path()
         if path is None:
+            print("WARNING: Stockfish binary not found under engine/", flush=True)
             return None
         try:
+            print(f"Starting Stockfish at {path}", flush=True)
             _engine = chess.engine.SimpleEngine.popen_uci(str(path))
+            _configure_engine(_engine)
         except Exception as exc:
             print(f"WARNING: failed to start Stockfish at {path}: {exc}", flush=True)
             _engine = None
@@ -276,13 +326,7 @@ def _get_engine() -> chess.engine.SimpleEngine | None:
 
 def _reset_engine_limits(engine: chess.engine.SimpleEngine) -> None:
     """Clear practice-mode strength limits before a full-strength analyse."""
-    try:
-        engine.configure({
-            "UCI_LimitStrength": False,
-            "Skill Level": 20,
-        })
-    except Exception:
-        pass
+    _configure_engine(engine)
 
 
 def _reset_engine():
@@ -418,6 +462,27 @@ def _color_payload(report, games_with_moves, player_username: str = ""):
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/api/engine-status")
+def engine_status():
+    """Deploy health check: can we find/start Stockfish?"""
+    path = _engine_path()
+    if path is None:
+        return jsonify({"ok": False, "error": "Stockfish binary not found", "path": None}), 503
+    try:
+        with _engine_lock:
+            engine = _get_engine()
+            if engine is None:
+                return jsonify({
+                    "ok": False,
+                    "error": "Stockfish failed to start",
+                    "path": str(path),
+                }), 503
+        return jsonify({"ok": True, "path": str(path)})
+    except Exception as exc:
+        _reset_engine()
+        return jsonify({"ok": False, "error": str(exc), "path": str(path)}), 500
 
 
 @app.get("/api/eval")
