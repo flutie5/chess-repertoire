@@ -51,6 +51,11 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   header h1 { font-size: 18px; margin: 0 12px 0 0; font-weight: 700; }
+  header h1 a {
+    color: inherit; text-decoration: none; cursor: pointer;
+  }
+  header h1 a:hover { color: var(--text-primary); }
+  header h1 a:hover span { color: var(--green-hover); }
   header h1 span { color: var(--green); }
   .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   input[type=text] {
@@ -84,12 +89,14 @@
   #status.error { color: var(--loss-red); }
 
   main {
-    display: grid; grid-template-columns: max-content 420px;
+    --sidebar-px: 420px;
+    display: grid; grid-template-columns: max-content var(--sidebar-px);
     gap: 20px; padding: 20px 22px; max-width: none; width: fit-content;
     margin: 0 auto; min-width: min(100%, 980px);
   }
   @media (max-width: 1000px) {
     main { grid-template-columns: 1fr; width: 100%; min-width: 0; }
+    #sidebar-resize { display: none; }
   }
 
   /* ---- board ---- */
@@ -120,38 +127,43 @@
   }
   .material-tray .adv.empty { visibility: hidden; }
   .player-strip {
-    display: flex; align-items: flex-start; gap: 10px;
+    display: flex; align-items: flex-start; gap: 8px;
     width: calc(var(--board-px) + 30px);
-    padding: 2px 4px 4px;
+    padding: 4px 2px 6px;
     min-height: 28px;
   }
   .player-strip.idle .player-avatar { display: none; }
   .player-strip.idle .player-id { display: none; }
   .player-avatar {
-    flex: none; width: 36px; height: 36px; border-radius: 4px;
+    flex: none; width: 40px; height: 40px; border-radius: 4px;
     background: #4a4a4a
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23999'%3E%3Cpath d='M12 2c-1.5 2.5-3 4.2-3 6.5 0 1.5.8 2.8 2 3.4v.6c-3.5.5-6 2.4-6 5.5h14c0-3.1-2.5-5-6-5.5v-.6c1.2-.6 2-1.9 2-3.4C15 6.2 13.5 4.5 12 2z'/%3E%3C/svg%3E")
       center 60% / 70% no-repeat;
   }
-  .player-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .player-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .player-id {
-    display: flex; align-items: baseline; gap: 4px;
-    line-height: 1.2; min-height: 18px;
+    display: flex; align-items: baseline; gap: 5px;
+    line-height: 1.25; min-height: 20px;
   }
   .player-name {
-    font-size: 14px; font-weight: 700; color: #fff;
+    font-size: 15px; font-weight: 700; color: #fff;
+    letter-spacing: 0.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .player-rating {
-    font-size: 13px; font-weight: 500; color: var(--text-muted);
+    font-size: 14px; font-weight: 500; color: #a3a3a3;
     flex: none; font-variant-numeric: tabular-nums;
   }
   .player-strip .material-tray {
     width: auto; min-height: 22px; padding: 0;
   }
   .player-strip .material-tray .caps img {
-    width: 20px; height: 20px; margin-left: -5px;
+    width: 22px; height: 22px; margin-left: -6px;
   }
+  body.game-view .player-strip { min-height: 44px; }
+  body.game-view .player-avatar { width: 44px; height: 44px; }
+  body.game-view .player-name { font-size: 16px; }
+  body.game-view .player-rating { font-size: 15px; color: #b0b0b0; }
   .piece-bank {
     display: none; flex-direction: column; gap: 6px;
     width: calc(var(--board-px) + 30px);
@@ -310,6 +322,7 @@
     border-radius: var(--radius);
     padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 4px 2px;
   }
+  body.game-view #line-moves { display: none; }
   #line-moves .mvnum { color: var(--text-muted); margin-left: 6px; }
   #line-moves .mv { padding: 1px 6px; border-radius: 4px; cursor: pointer; }
   #line-moves .mv:hover { background: var(--bg-card-hover); }
@@ -319,8 +332,130 @@
   #line-moves .mv.bad-inaccuracy { background: rgba(86, 180, 233, .3); }
   #line-moves .placeholder { color: var(--text-muted); }
 
+  /* ---- game view (chess.com Moves panel) ---- */
+  #close-game-btn {
+    display: none; width: 100%;
+    background: #2c2a27; color: #fff;
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    padding: 10px 12px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #close-game-btn:hover { border-color: var(--green); background: #353330; }
+  body.game-view #close-game-btn { display: block; }
+  body.game-view #range-wrap,
+  body.game-view #tc-group,
+  body.game-view #summary,
+  body.game-view #opening-sort,
+  body.game-view #openings { display: none !important; }
+  body.game-view #game-panel { display: flex; }
+  body.game-view #analyze-sidebar {
+    gap: 8px;
+    background: #262421;
+    border-radius: 0;
+    margin: -8px -4px -8px 0;
+    padding: 8px 0 0;
+  }
+  body.game-view #analyze-sidebar .color-tabs {
+    margin: 0 12px; gap: 8px;
+  }
+  body.game-view #close-game-btn { width: calc(100% - 24px); margin: 0 12px; }
+  #game-panel {
+    display: none; flex-direction: column; gap: 0;
+    flex: 1; min-height: 0;
+    background: #262421; border: 0; border-radius: 0;
+    overflow: hidden;
+    max-height: none; height: calc(100vh - 200px);
+  }
+  #game-opening-title {
+    padding: 10px 16px 8px; font-size: 13px; font-weight: 500;
+    color: #a7a6a2; line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #game-moves {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 0 8px 8px;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px; line-height: 1.2;
+    background: #262421;
+  }
+  #game-moves::-webkit-scrollbar { width: 10px; }
+  #game-moves::-webkit-scrollbar-track { background: #262421; }
+  #game-moves::-webkit-scrollbar-thumb { background: #3d3a37; border-radius: 5px; }
+  .gm-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    min-height: 32px;
+    column-gap: 2px;
+  }
+  .gm-num {
+    color: #787774; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 6px; user-select: none;
+  }
+  .gm-mv {
+    appearance: none; -webkit-appearance: none;
+    display: inline-flex; align-items: center; gap: 2px;
+    margin: 1px 0; padding: 4px 8px 4px 6px;
+    min-height: 28px; min-width: 0; width: 100%;
+    background: transparent; border: 0; border-radius: 3px;
+    color: #ffffff; font: inherit; text-align: left;
+    cursor: pointer; box-sizing: border-box;
+  }
+  .gm-mv:hover { background: rgba(255,255,255,.06); }
+  .gm-mv:focus { outline: none; }
+  .gm-mv.cur {
+    background: #3d3a37; color: #fff;
+  }
+  .gm-mv.cur:hover { background: #454239; }
+  .gm-mv.bad-blunder { box-shadow: inset 3px 0 0 #e69f00; }
+  .gm-mv.bad-mistake { box-shadow: inset 3px 0 0 #f1c40f; }
+  .gm-mv.bad-inaccuracy { box-shadow: inset 3px 0 0 #56b4e9; }
+  .gm-mv img {
+    width: 18px; height: 18px; flex: none;
+    object-fit: contain;
+    filter: drop-shadow(0 0 0.5px rgba(0,0,0,.8));
+  }
+  .gm-mv .san-rest {
+    font-size: 13px; font-weight: 600; color: inherit;
+    letter-spacing: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .game-panel-nav {
+    display: flex; gap: 8px; padding: 10px 12px 12px;
+    border-top: 1px solid rgba(255,255,255,.06); background: #262421;
+  }
+  .game-panel-nav button {
+    flex: 1; appearance: none; -webkit-appearance: none;
+    background: #312e2b; color: #c3c2c1;
+    border: 0; border-radius: 8px;
+    padding: 12px 6px; font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .game-panel-nav button:hover { background: #3d3a37; color: #fff; }
+
   /* ---- sidebar ---- */
   .sidebar { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  #analyze-sidebar {
+    position: relative;
+    width: 100%;
+  }
+  #sidebar-resize {
+    position: absolute; top: 0; right: -6px; bottom: 0;
+    width: 12px; z-index: 30;
+    cursor: ew-resize; touch-action: none;
+  }
+  #sidebar-resize::after {
+    content: "";
+    position: absolute; top: 0; bottom: 0; left: 5px;
+    width: 2px; border-radius: 1px;
+    background: transparent;
+    transition: background .12s ease;
+  }
+  #sidebar-resize:hover::after,
+  body.sidebar-resizing #sidebar-resize::after {
+    background: var(--green);
+  }
+  body.sidebar-resizing { cursor: ew-resize; user-select: none; }
+  body.sidebar-resizing * { cursor: ew-resize !important; }
 
   /* time-frame dropdown */
   .range-wrap { position: relative; }
@@ -390,6 +525,19 @@
   }
   .color-tabs button.active { background: var(--green); color: #fff; border-color: var(--green); }
   #summary { color: var(--text-muted); font-size: 13px; }
+  .sort-tabs {
+    display: flex; gap: 6px; margin: 2px 0 4px;
+  }
+  .sort-tabs button {
+    flex: 1; background: var(--bg-card); color: var(--text-secondary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 6px 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .sort-tabs button:hover { border-color: var(--green); color: var(--text-primary); }
+  .sort-tabs button.active {
+    background: var(--bg-card-hover); color: var(--text-primary);
+    border-color: var(--green);
+  }
   #openings {
     display: flex; flex-direction: column; gap: 8px;
     max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 4px;
@@ -507,6 +655,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .game-row .gopp .grating { color: var(--text-muted); }
+  .game-row.replayable { cursor: pointer; }
   .game-row .gopp.replayable { cursor: pointer; }
   .game-row .gopp.replayable:hover {
     color: var(--text-primary);
@@ -514,7 +663,7 @@
   }
   .game-row .gopp.replayable:hover .grating { color: var(--text-secondary); }
   .game-row .gdate { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-  a.gdate { text-decoration: none; }
+  a.gdate { text-decoration: none; cursor: alias; }
   a.gdate:hover { color: var(--green); text-decoration: underline; }
   .game-more {
     padding: 6px 12px 8px 22px; font-size: 12px; font-weight: 600;
@@ -571,6 +720,19 @@
   .modal .form-msg.ok { color: var(--green); }
   .modal-actions { display: flex; gap: 10px; margin-top: 2px; }
   .modal-actions .primary { flex: 1; }
+  .auth-google-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    min-height: 44px;
+  }
+  .auth-divider {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-muted); font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .auth-divider::before, .auth-divider::after {
+    content: ""; flex: 1; height: 1px; background: var(--border-subtle);
+  }
+  .auth-email-block { display: flex; flex-direction: column; gap: 12px; }
   button.ghost {
     flex: 1; background: var(--bg-card); color: var(--text-primary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
@@ -685,8 +847,13 @@
     display: flex; align-items: center; gap: 8px;
     padding: 5px 8px 5px 16px; border-radius: var(--radius-sm);
     font-size: 12px; color: var(--text-secondary);
+    cursor: pointer;
   }
   .rep-line:hover { background: var(--bg-card-hover); }
+  .rep-line.active-preview {
+    background: rgba(129, 182, 76, 0.14);
+    outline: 1px solid rgba(129, 182, 76, 0.35);
+  }
   .rep-line .eco {
     font-size: 10px; color: var(--text-muted); font-weight: 700;
     min-width: 2.4em;
@@ -748,9 +915,10 @@
 <body>
 
 <header>
-  <h1>Chess Repertoire <span>Explorer</span></h1>
+  <h1><a href="/" id="home-link" title="Home">Chess Repertoire <span>Explorer</span></a></h1>
   <div class="controls">
-    <input id="username" type="text" placeholder="chess.com username" spellcheck="false">
+    <input id="username" type="text" list="username-recent" placeholder="chess.com username" spellcheck="false" autocomplete="off">
+    <datalist id="username-recent"></datalist>
     <button class="primary" id="analyze-btn">Analyze</button>
     <span id="status"></span>
   </div>
@@ -768,17 +936,27 @@
 
 <div class="modal-overlay" id="auth-modal">
   <div class="modal">
-    <h2>Welcome back</h2>
-    <label>Email
-      <input id="auth-email" type="email" placeholder="you@example.com" spellcheck="false">
-    </label>
-    <label>Password
-      <input id="auth-password" type="password" placeholder="At least 8 characters">
-    </label>
-    <div class="form-msg" id="auth-msg"></div>
-    <div class="modal-actions">
-      <button class="primary" id="auth-login-btn">Log in</button>
-      <button class="ghost" id="auth-register-btn">Create account</button>
+    <h2>Sign in to save your repertoire</h2>
+    <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
+      Log in to sync My Repertoire across devices.
+    </p>
+    <div class="auth-google-wrap">
+      <div id="google-signin-btn"></div>
+      <div class="form-msg" id="auth-google-msg"></div>
+    </div>
+    <div class="auth-divider">or email</div>
+    <div class="auth-email-block">
+      <label>Email
+        <input id="auth-email" type="email" placeholder="you@example.com" spellcheck="false">
+      </label>
+      <label>Password
+        <input id="auth-password" type="password" placeholder="At least 8 characters">
+      </label>
+      <div class="form-msg" id="auth-msg"></div>
+      <div class="modal-actions">
+        <button class="primary" id="auth-login-btn">Log in</button>
+        <button class="ghost" id="auth-register-btn">Create account</button>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="ghost" id="auth-cancel-btn">Cancel</button>
@@ -815,7 +993,7 @@
     </div>
   </div>
 
-  <div class="profile-card">
+  <div class="profile-card" id="profile-password-card">
     <h2>Change password</h2>
     <label>Current password
       <input id="profile-pw-current" type="password" autocomplete="current-password">
@@ -930,10 +1108,26 @@
       <button id="tab-white" class="active">As White</button>
       <button id="tab-black">As Black</button>
     </div>
+    <button type="button" id="close-game-btn" title="Return to opening list">Close game</button>
     <div id="summary"></div>
+    <div class="sort-tabs" id="opening-sort" hidden>
+      <button type="button" data-sort="frequent" class="active" title="Sort by how often you play each opening">Most played</button>
+      <button type="button" data-sort="recent" title="Sort by when you last played each opening">Most recent</button>
+    </div>
     <div id="openings">
       <div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>
     </div>
+    <div id="game-panel" aria-label="Game moves">
+      <div id="game-opening-title"></div>
+      <div id="game-moves"></div>
+      <div class="game-panel-nav">
+        <button type="button" id="game-nav-start" title="Start">|&#8249;</button>
+        <button type="button" id="game-nav-prev" title="Previous move">&#8249;</button>
+        <button type="button" id="game-nav-next" title="Next move">&#8250;</button>
+        <button type="button" id="game-nav-end" title="End">&#8250;|</button>
+      </div>
+    </div>
+    <div id="sidebar-resize" title="Drag to resize sidebar" aria-hidden="true"></div>
   </aside>
 
   <aside class="sidebar" id="repertoire-sidebar">
@@ -955,12 +1149,16 @@
     <h3>Practice vs Stockfish</h3>
     <div class="rep-practice-toolbar">
       <label>Difficulty
-        <select id="rep-difficulty" title="Stockfish skill">
-          <option value="1">1 — Beginner</option>
-          <option value="3">3 — Easy</option>
-          <option value="5" selected>5 — Intermediate</option>
-          <option value="7">7 — Strong</option>
-          <option value="10">10 — Hard</option>
+        <select id="rep-difficulty" title="Opponent Elo">
+          <option value="1400">1400 Elo</option>
+          <option value="1600">1600 Elo</option>
+          <option value="1800" selected>1800 Elo</option>
+          <option value="2000">2000 Elo</option>
+          <option value="2200">2200 Elo</option>
+          <option value="2400">2400 Elo</option>
+          <option value="2600">2600 Elo</option>
+          <option value="2800">2800 Elo</option>
+          <option value="3000">3000 Elo</option>
         </select>
       </label>
       <span id="rep-practice-status" class="rep-empty"></span>
@@ -971,6 +1169,7 @@
   </section>
 </main>
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module">
 import { Chess } from "/vendor/chess.js";
 
@@ -993,7 +1192,10 @@ const state = {
   repColor: "white",       // My Repertoire White/Black pill
   myRepertoire: { white: [], black: [] },
   practiceMode: false,
-  practiceLevel: 5,
+  practiceElo: 1800,
+  openingSort: "frequent", // "frequent" | "recent"
+  gameView: false,         // true when replaying a selected game (sidebar = moves)
+  activeGame: null,        // game entry currently open in game view
 };
 
 /* ---------- game model (chess.js) ---------- */
@@ -1136,7 +1338,11 @@ function relocatePiece(from, to) {
   if (!pc) return;
   delete map[from];
   map[to] = pc;
-  setCustomFen(fenFromBoardMap(map));
+  // After a board move in the editor, flip side-to-move (White ↔ Black).
+  const curTurn = (currentFen().split(/\s+/)[1] === "b") ? "b" : "w";
+  const nextTurn = curTurn === "w" ? "b" : "w";
+  setCustomFen(fenFromBoardMap(map, nextTurn));
+  updateEditTurnBtns();
 }
 
 function setSideToMove(turn) {
@@ -1429,6 +1635,9 @@ function applyOpeningResult(data, ply) {
   if (data && data.name) {
     state.lastOpeningName = data.eco ? `${data.name} (${data.eco})` : data.name;
     setBoardTitle(state.lastOpeningName);
+    if (state.gameView && gameOpeningTitleEl) {
+      gameOpeningTitleEl.textContent = state.lastOpeningName;
+    }
     return;
   }
   if (state.lastOpeningName) {
@@ -1436,11 +1645,21 @@ function applyOpeningResult(data, ply) {
   } else {
     setBoardTitle(ply > 0 ? `Position after ${Math.ceil(ply / 2)} moves` : "Starting position");
   }
+  if (state.gameView && gameOpeningTitleEl && state.lastOpeningName) {
+    gameOpeningTitleEl.textContent = state.lastOpeningName;
+  }
 }
 
 function scheduleOpeningTitle() {
   const ply = state.ply;
   if (ply === 0) {
+    if (state.gameView) {
+      // Keep the game's variation name while scrubbing back to the start.
+      const title = state.activeGame?.variation || state.lastOpeningName || "Game";
+      setBoardTitle(title);
+      if (gameOpeningTitleEl) gameOpeningTitleEl.textContent = title;
+      return;
+    }
     state.lastOpeningName = null;
     if (state.editMode) setBoardTitle("Edit position");
     else if (gameRootFen !== START_FEN || freeFen) setBoardTitle("Custom position");
@@ -1717,8 +1936,130 @@ function drawBestArrow(from, to) {
 
 const movesEl = document.getElementById("line-moves");
 const titleEl = document.getElementById("line-title");
+const gameMovesEl = document.getElementById("game-moves");
+const gameOpeningTitleEl = document.getElementById("game-opening-title");
+const closeGameBtn = document.getElementById("close-game-btn");
+
+const FIGURINE_PIECES = { K: "k", Q: "q", R: "r", B: "b", N: "n" };
+
+/** Parse SAN into a piece figurine + remaining text (chess.com style). */
+function parseSanFigurine(san, isWhite) {
+  const s = String(san || "");
+  if (!s) return { piece: null, rest: "", color: isWhite ? "w" : "b" };
+  if (s.startsWith("O-O") || s.startsWith("0-0")) {
+    return { piece: null, rest: s.replace(/0/g, "O"), color: isWhite ? "w" : "b" };
+  }
+  if (FIGURINE_PIECES[s[0]]) {
+    return {
+      piece: FIGURINE_PIECES[s[0]],
+      rest: s.slice(1),
+      color: isWhite ? "w" : "b",
+    };
+  }
+  return { piece: null, rest: s, color: isWhite ? "w" : "b" };
+}
+
+function makeFigurineMoveEl(san, ply, flag) {
+  const isWhite = ply % 2 === 1;
+  const { piece, rest, color } = parseSanFigurine(san, isWhite);
+  const el = document.createElement("button");
+  el.type = "button";
+  const isCur = state.ply === ply;
+  el.className = "gm-mv" +
+    (isCur ? " cur" : "") +
+    (flag ? " bad-" + flag.severity : "");
+  // Chess.com: figurines for N/B/R/Q/K only — pawns stay plain SAN (e4, exd5).
+  if (piece && piece !== "p") {
+    const img = document.createElement("img");
+    img.src = `/pieces/${color}${piece}.png`;
+    img.alt = "";
+    img.draggable = false;
+    el.appendChild(img);
+  }
+  const txt = document.createElement("span");
+  txt.className = "san-rest";
+  txt.textContent = piece && FIGURINE_PIECES[san[0]] ? rest : san;
+  el.appendChild(txt);
+  if (flag) {
+    el.title = `${flag.severity}: lost ${(flag.loss_cp / 100).toFixed(1)}` +
+      (flag.best_san ? ` (better: ${flag.best_san})` : "");
+  }
+  el.onclick = () => { state.ply = ply; refreshBoard(); };
+  return el;
+}
+
+function setGameView(on, game) {
+  state.gameView = !!on;
+  state.activeGame = on ? (game || state.activeGame) : null;
+  if (state.gameView) document.body.classList.add("game-view");
+  else document.body.classList.remove("game-view");
+  if (state.gameView) {
+    const g = state.activeGame;
+    const title = g?.variation || state.lastOpeningName || "Game";
+    if (gameOpeningTitleEl) gameOpeningTitleEl.textContent = title;
+    if (titleEl) titleEl.textContent = title;
+  }
+  renderMoveList();
+}
+
+function closeGameView() {
+  setGameView(false);
+  clearBoardPlayers();
+  // Keep current board position; user can keep analyzing or pick another opening.
+  renderMoveList();
+}
+
+function renderGameMoveList() {
+  if (!gameMovesEl) return;
+  gameMovesEl.innerHTML = "";
+  if (!state.sans.length) {
+    gameMovesEl.innerHTML = '<div class="rep-empty" style="padding:12px">No moves in this game.</div>';
+    return;
+  }
+  const badByPly = new Map();
+  for (const f of (state.moveFlags || [])) badByPly.set(f.ply, f);
+
+  let curEl = null;
+  for (let i = 0; i < state.sans.length; i += 2) {
+    const row = document.createElement("div");
+    row.className = "gm-row";
+    const num = document.createElement("div");
+    num.className = "gm-num";
+    num.textContent = (i / 2 + 1) + ".";
+    row.appendChild(num);
+
+    const wPly = i + 1;
+    const wEl = makeFigurineMoveEl(state.sans[i], wPly, badByPly.get(wPly));
+    row.appendChild(wEl);
+    if (state.ply === wPly) curEl = wEl;
+
+    if (i + 1 < state.sans.length) {
+      const bPly = i + 2;
+      const bEl = makeFigurineMoveEl(state.sans[i + 1], bPly, badByPly.get(bPly));
+      row.appendChild(bEl);
+      if (state.ply === bPly) curEl = bEl;
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "gm-mv";
+      empty.style.visibility = "hidden";
+      row.appendChild(empty);
+    }
+    gameMovesEl.appendChild(row);
+  }
+  if (curEl) {
+    try { curEl.scrollIntoView({ block: "nearest" }); } catch (e) { /* ignore */ }
+  }
+}
 
 function renderMoveList() {
+  if (state.gameView) {
+    renderGameMoveList();
+    if (gameOpeningTitleEl) {
+      gameOpeningTitleEl.textContent =
+        state.activeGame?.variation || state.lastOpeningName || "Game";
+    }
+    return;
+  }
   movesEl.innerHTML = "";
   if (state.editMode) {
     movesEl.innerHTML = '<span class="placeholder">Edit mode — drag pieces from the trays onto the board. Drag a piece off the board to remove it.</span>';
@@ -1779,6 +2120,7 @@ function resetGame(title) {
   state.moveFlags = [];
   state.lastOpeningName = null;
   clearBoardPlayers();
+  setGameView(false);
   // Title is set by scheduleOpeningTitle() inside refreshBoard().
   clearGamesFilters();
   refreshBoard();
@@ -1788,6 +2130,11 @@ document.getElementById("nav-prev").onclick = () => setPly(state.ply - 1);
 document.getElementById("nav-next").onclick = () => setPly(state.ply + 1);
 document.getElementById("nav-end").onclick = () => setPly(Infinity);
 document.getElementById("nav-reset").onclick = () => resetGame();
+document.getElementById("game-nav-start").onclick = () => setPly(0);
+document.getElementById("game-nav-prev").onclick = () => setPly(state.ply - 1);
+document.getElementById("game-nav-next").onclick = () => setPly(state.ply + 1);
+document.getElementById("game-nav-end").onclick = () => setPly(Infinity);
+if (closeGameBtn) closeGameBtn.onclick = () => closeGameView();
 
 document.getElementById("flip-board-btn").onclick = () => {
   state.orientation = state.orientation === "white" ? "black" : "white";
@@ -1833,6 +2180,49 @@ function initBoardResize() {
   });
 }
 initBoardResize();
+
+const SIDEBAR_PX_LS = "sidebarPx";
+const SIDEBAR_PX_MIN = 280;
+const SIDEBAR_PX_MAX = 720;
+const mainEl = document.querySelector("main");
+const sidebarResize = document.getElementById("sidebar-resize");
+
+function applySidebarPx(px) {
+  if (!mainEl) return px;
+  const max = Math.min(SIDEBAR_PX_MAX, Math.max(SIDEBAR_PX_MIN, window.innerWidth - 360));
+  px = Math.round(Math.min(max, Math.max(SIDEBAR_PX_MIN, px)));
+  mainEl.style.setProperty("--sidebar-px", px + "px");
+  return px;
+}
+
+function initSidebarResize() {
+  if (!mainEl || !sidebarResize) return;
+  const saved = Number(localStorage.getItem(SIDEBAR_PX_LS));
+  applySidebarPx(Number.isFinite(saved) && saved > 0 ? saved : 420);
+
+  let startX = 0, startPx = 420;
+  sidebarResize.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    sidebarResize.setPointerCapture(e.pointerId);
+    document.body.classList.add("sidebar-resizing");
+    startX = e.clientX;
+    startPx = parseFloat(getComputedStyle(mainEl).getPropertyValue("--sidebar-px")) || 420;
+  });
+  sidebarResize.addEventListener("pointermove", e => {
+    if (!sidebarResize.hasPointerCapture(e.pointerId)) return;
+    applySidebarPx(startPx + (e.clientX - startX));
+  });
+  const endResize = e => {
+    if (!sidebarResize.hasPointerCapture(e.pointerId)) return;
+    sidebarResize.releasePointerCapture(e.pointerId);
+    document.body.classList.remove("sidebar-resizing");
+    const px = parseFloat(getComputedStyle(mainEl).getPropertyValue("--sidebar-px")) || 420;
+    localStorage.setItem(SIDEBAR_PX_LS, String(Math.round(px)));
+  };
+  sidebarResize.addEventListener("pointerup", endResize);
+  sidebarResize.addEventListener("pointercancel", endResize);
+}
+initSidebarResize();
 
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
@@ -1896,6 +2286,7 @@ function loadLine(line, openingName) {
   state.moveFlags = [];
   state.lastOpeningName = line.name || null;
   clearBoardPlayers();
+  setGameView(false);
   // Provisional title; scheduleOpeningTitle() refines it move-by-move.
   titleEl.textContent = line.name || "Starting position";
   clearGamesFilters();
@@ -1909,7 +2300,7 @@ function loadLine(line, openingName) {
 }
 
 function loadGameReplay(g) {
-  // Load the full game into the analyzer; preview only the first 5 moves.
+  // Load the game into the analyzer and switch sidebar to chess.com-style moves.
   if (state.editMode) setEditMode(false);
   freeFen = null;
   gameRootFen = START_FEN;
@@ -1925,6 +2316,7 @@ function loadGameReplay(g) {
   state.lastOpeningName = g.variation || null;
   titleEl.textContent = g.variation || "Starting position";
   setBoardPlayersFromGame(g);
+  setGameView(true, g);
   // Keep any variation filter/highlight: the user is browsing that list.
   animateLine(GAME_PREVIEW_PLIES);
 }
@@ -1968,16 +2360,69 @@ function displayOpeningName(color, name) {
   return name;
 }
 
+function openingLastPlayed(op) {
+  let best = "";
+  for (const g of op.game_list || []) {
+    if (g.date && g.date > best) best = g.date;
+  }
+  return best;
+}
+
+function variationLastPlayed(op, variationName) {
+  let best = "";
+  for (const g of op.game_list || []) {
+    if (g.variation !== variationName) continue;
+    if (g.date && g.date > best) best = g.date;
+  }
+  return best;
+}
+
+function sortOpeningsList(list) {
+  const arr = list.slice();
+  if (state.openingSort === "recent") {
+    arr.sort((a, b) => {
+      const da = openingLastPlayed(a);
+      const db = openingLastPlayed(b);
+      if (da !== db) return db.localeCompare(da);
+      return (b.games || 0) - (a.games || 0) || a.name.localeCompare(b.name);
+    });
+  } else {
+    arr.sort((a, b) =>
+      (b.games || 0) - (a.games || 0) || a.name.localeCompare(b.name));
+  }
+  return arr;
+}
+
+function sortedVariations(op) {
+  const vars = (op.variations || []).slice();
+  if (state.openingSort === "recent") {
+    vars.sort((a, b) => {
+      const da = variationLastPlayed(op, a.name);
+      const db = variationLastPlayed(op, b.name);
+      if (da !== db) return db.localeCompare(da);
+      return (b.games || 0) - (a.games || 0);
+    });
+  } else {
+    vars.sort((a, b) => (b.games || 0) - (a.games || 0));
+  }
+  return vars;
+}
+
 function appendOpeningBox(op, displayName) {
   const box = document.createElement("div");
   box.className = "opening";
+
+  const last = openingLastPlayed(op);
+  const metaExtra = state.openingSort === "recent" && last
+    ? ` \u00B7 ${last}`
+    : "";
 
   const head = document.createElement("div");
   head.className = "opening-head";
   head.innerHTML =
     `<span class="chev">\u25B8</span>` +
     `<span class="name"></span>` +
-    `<span class="meta">${op.games} games \u00B7 ${op.score}%</span>` +
+    `<span class="meta">${op.games} games \u00B7 ${op.score}%${metaExtra}</span>` +
     `<span class="scorebar"><i style="width:${op.score}%"></i></span>`;
   head.querySelector(".name").textContent = displayName;
   head.onclick = () => box.classList.toggle("open");
@@ -1985,7 +2430,7 @@ function appendOpeningBox(op, displayName) {
 
   const lines = document.createElement("div");
   lines.className = "lines";
-  for (const v of op.variations) {
+  for (const v of sortedVariations(op)) {
     const row = document.createElement("div");
     row.className = "line";
     row.dataset.key = op.name + "||" + v.name;
@@ -2014,17 +2459,51 @@ function appendOpeningBox(op, displayName) {
   openingsEl.appendChild(box);
 }
 
+const OPENING_SORT_LS = "openingSort";
+const openingSortEl = document.getElementById("opening-sort");
+
+function syncOpeningSortButtons() {
+  if (!openingSortEl) return;
+  for (const btn of openingSortEl.querySelectorAll("button[data-sort]")) {
+    btn.classList.toggle("active", btn.dataset.sort === state.openingSort);
+  }
+}
+
+function setOpeningSort(mode) {
+  state.openingSort = mode === "recent" ? "recent" : "frequent";
+  try { localStorage.setItem(OPENING_SORT_LS, state.openingSort); } catch (e) { /* ignore */ }
+  syncOpeningSortButtons();
+  renderSidebar();
+}
+
+(function initOpeningSort() {
+  try {
+    const saved = localStorage.getItem(OPENING_SORT_LS);
+    if (saved === "recent" || saved === "frequent") state.openingSort = saved;
+  } catch (e) { /* ignore */ }
+  syncOpeningSortButtons();
+  if (openingSortEl) {
+    openingSortEl.addEventListener("click", e => {
+      const btn = e.target.closest("button[data-sort]");
+      if (!btn) return;
+      setOpeningSort(btn.dataset.sort);
+    });
+  }
+})();
+
 function renderSidebar() {
   openingsEl.innerHTML = "";
   if (!state.report) {
     openingsEl.innerHTML = '<div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>';
     summaryEl.textContent = "";
+    if (openingSortEl) openingSortEl.hidden = true;
     return;
   }
   const rep = state.report[state.color];
   if (!rep) {
     openingsEl.innerHTML = '<div class="empty-note">No data for this color.</div>';
     summaryEl.textContent = "";
+    if (openingSortEl) openingSortEl.hidden = true;
     return;
   }
   summaryEl.textContent =
@@ -2039,7 +2518,13 @@ function renderSidebar() {
 
   if (!openings.length) {
     openingsEl.innerHTML = '<div class="empty-note">No games match the selected time controls.</div>';
+    if (openingSortEl) openingSortEl.hidden = true;
     return;
+  }
+
+  if (openingSortEl) {
+    openingSortEl.hidden = false;
+    syncOpeningSortButtons();
   }
 
   const { yours, faced } = partitionOpeningsForColor(state.color, openings);
@@ -2051,7 +2536,9 @@ function renderSidebar() {
       ? "Your openings (as White)"
       : "Your defenses (as Black)";
     openingsEl.appendChild(lab);
-    for (const op of yours) appendOpeningBox(op, displayOpeningName(state.color, op.name));
+    for (const op of sortOpeningsList(yours)) {
+      appendOpeningBox(op, displayOpeningName(state.color, op.name));
+    }
   }
 
   if (faced.length) {
@@ -2061,7 +2548,9 @@ function renderSidebar() {
       ? "Defenses you faced (still as White)"
       : "Lines you faced (still as Black)";
     openingsEl.appendChild(lab);
-    for (const op of faced) appendOpeningBox(op, displayOpeningName(state.color, op.name));
+    for (const op of sortOpeningsList(faced)) {
+      appendOpeningBox(op, displayOpeningName(state.color, op.name));
+    }
   }
 }
 
@@ -2075,7 +2564,7 @@ function makeGameRow(g) {
   badge.className = "rbadge " + g.result;
   badge.textContent = g.result === "win" ? "W" : g.result === "loss" ? "L" : "D";
 
-  // Opponent zone: click replays the game's opening moves on the board.
+  // Opponent zone: click (or whole row) opens chess.com-style game view.
   const opp = document.createElement("span");
   opp.className = "gopp";
   opp.textContent = g.opponent;
@@ -2087,8 +2576,13 @@ function makeGameRow(g) {
   }
   if (g.san && g.san.length) {
     opp.classList.add("replayable");
-    opp.title = (g.variation ? g.variation + " \u2014 " : "") + "Replay opening moves on the board";
-    opp.onclick = () => loadGameReplay(g);
+    row.classList.add("replayable");
+    row.title = (g.variation ? g.variation + " \u2014 " : "") + "Open game moves";
+    opp.title = row.title;
+    row.onclick = e => {
+      if (e.target.closest("a.gdate")) return;
+      loadGameReplay(g);
+    };
   } else if (g.variation) {
     opp.title = g.variation;
   }
@@ -2106,6 +2600,7 @@ function makeGameRow(g) {
   }
   date.className = "gdate";
   date.textContent = g.date || "";
+  date.addEventListener("click", e => e.stopPropagation());
 
   row.append(badge, opp);
 
@@ -2286,6 +2781,7 @@ function setColor(color) {
   state.orientation = color;  // match board perspective to the side you're studying
   document.getElementById("tab-white").classList.toggle("active", color === "white");
   document.getElementById("tab-black").classList.toggle("active", color === "black");
+  if (state.gameView) closeGameView();
   renderSidebar();
   resetGame();
 }
@@ -2387,6 +2883,7 @@ async function ensureApiBase() {
 
 function applyReport(data) {
   state.report = data;
+  if (data.username) rememberUsername(data.username);
   let msg = `${data.analyzed_games} rated games analyzed (${
     data.since || data.until
       ? rangeLabel.textContent
@@ -2623,12 +3120,60 @@ document.getElementById("range-apply").onclick = () => {
   applyRange({ preset: "custom", since: from || null, until: to || null }, label);
 };
 
+/* ---------- recent chess.com usernames ---------- */
+
+const RECENT_LS = "recentUsernames";
+const RECENT_MAX = 8;
+
+function getRecentUsernames() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_LS) || "[]");
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter(u => typeof u === "string" && u.trim())
+      .map(u => u.trim())
+      .slice(0, RECENT_MAX);
+  } catch (e) {
+    return [];
+  }
+}
+
+function rememberUsername(username) {
+  const u = String(username || "").trim();
+  if (!u) return;
+  const lower = u.toLowerCase();
+  const next = [u, ...getRecentUsernames().filter(x => x.toLowerCase() !== lower)]
+    .slice(0, RECENT_MAX);
+  localStorage.setItem(RECENT_LS, JSON.stringify(next));
+  renderRecentUsernames();
+}
+
+function renderRecentUsernames() {
+  const dl = document.getElementById("username-recent");
+  if (!dl) return;
+  dl.innerHTML = getRecentUsernames()
+    .map(u => `<option value="${String(u).replace(/"/g, "&quot;")}"></option>`)
+    .join("");
+}
+
+function initRecentUsernames() {
+  renderRecentUsernames();
+  const input = document.getElementById("username");
+  const recent = getRecentUsernames();
+  if (input && !input.value.trim() && recent[0]) {
+    input.value = recent[0];
+  }
+}
+
 /* ---------- accounts / profile ---------- */
 
-let currentUser = null;   // {email, chesscom_username, lichess_username} or null
+let currentUser = null;   // user payload from /api/me
+let googleClientId = null;
+let googleBtnRendered = false;
 
 const authModal = document.getElementById("auth-modal");
 const authMsg = document.getElementById("auth-msg");
+const authGoogleMsg = document.getElementById("auth-google-msg");
 const authOpenBtn = document.getElementById("auth-open-btn");
 const userMenuBtn = document.getElementById("user-menu-btn");
 const userMenu = document.getElementById("user-menu");
@@ -2642,7 +3187,7 @@ function setUser(user) {
   userMenuBtn.style.display = loggedIn ? "" : "none";
   meBtn.style.display = loggedIn ? "" : "none";
   if (loggedIn) {
-    userMenuBtn.textContent = user.email;
+    userMenuBtn.textContent = user.display_name || user.email;
     fillProfileForm(user);
     loadRepertoireFromServer();
   } else {
@@ -2662,6 +3207,8 @@ function fillProfileForm(user) {
   status.innerHTML =
     `<span class="profile-pill ${cc ? "ok" : "miss"}">chess.com: ${cc || "not linked"}</span>` +
     `<span class="profile-pill ${li ? "ok" : "miss"}">lichess: ${li || "not linked"}</span>`;
+  const pwCard = document.getElementById("profile-password-card");
+  if (pwCard) pwCard.style.display = user?.has_password ? "" : "none";
 }
 
 function openProfile() {
@@ -2706,16 +3253,20 @@ async function submitAuth(path) {
   setMsg(authMsg, "\u2026");
   try {
     const user = await api(path, "POST", { email, password });
-    setUser(user);
-    authModal.classList.remove("open");
-    document.getElementById("auth-password").value = "";
-    setMsg(authMsg, "");
-    // New accounts start empty — send them to Profile to link usernames.
-    const needsLinks = !(user.chesscom_username || user.lichess_username);
-    if (path === "/api/register" || needsLinks) openProfile();
+    finishLogin(user, path === "/api/register");
   } catch (e) {
     setMsg(authMsg, e.message, "error");
   }
+}
+
+function finishLogin(user, isNewAccount) {
+  setUser(user);
+  authModal.classList.remove("open");
+  document.getElementById("auth-password").value = "";
+  setMsg(authMsg, "");
+  setMsg(authGoogleMsg, "");
+  const needsLinks = !(user.chesscom_username || user.lichess_username);
+  if (isNewAccount || needsLinks) openProfile();
 }
 
 async function logout() {
@@ -2724,11 +3275,81 @@ async function logout() {
   setUser(null);
 }
 
-authOpenBtn.onclick = () => {
+async function handleGoogleCredential(response) {
+  const credential = response?.credential;
+  if (!credential) {
+    setMsg(authGoogleMsg, "Google sign-in failed.", "error");
+    return;
+  }
+  setMsg(authGoogleMsg, "\u2026");
+  try {
+    const user = await api("/api/auth/google", "POST", { credential });
+    finishLogin(user, false);
+  } catch (e) {
+    setMsg(authGoogleMsg, e.message, "error");
+  }
+}
+
+async function ensureGoogleClientId() {
+  if (googleClientId !== null) return googleClientId;
+  try {
+    const cfg = await api("/api/auth/config", "GET");
+    googleClientId = cfg.google_client_id || "";
+  } catch (e) {
+    googleClientId = "";
+  }
+  return googleClientId;
+}
+
+function renderGoogleButton() {
+  const host = document.getElementById("google-signin-btn");
+  if (!host || !googleClientId || !window.google?.accounts?.id) return;
+  if (!googleBtnRendered) {
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: handleGoogleCredential,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
+    googleBtnRendered = true;
+  }
+  host.innerHTML = "";
+  window.google.accounts.id.renderButton(host, {
+    theme: "outline",
+    size: "large",
+    text: "continue_with",
+    shape: "rectangular",
+    width: 320,
+  });
+}
+
+async function openAuthModal() {
   setMsg(authMsg, "");
+  setMsg(authGoogleMsg, "");
   authModal.classList.add("open");
-  document.getElementById("auth-email").focus();
-};
+  const clientId = await ensureGoogleClientId();
+  if (!clientId) {
+    setMsg(authGoogleMsg, "Google sign-in is not configured yet.", "error");
+  } else if (window.google?.accounts?.id) {
+    renderGoogleButton();
+  } else {
+    setMsg(authGoogleMsg, "Loading Google sign-in\u2026");
+    let tries = 0;
+    const wait = setInterval(() => {
+      tries += 1;
+      if (window.google?.accounts?.id) {
+        clearInterval(wait);
+        setMsg(authGoogleMsg, "");
+        renderGoogleButton();
+      } else if (tries > 40) {
+        clearInterval(wait);
+        setMsg(authGoogleMsg, "Could not load Google sign-in.", "error");
+      }
+    }, 100);
+  }
+}
+
+authOpenBtn.onclick = () => openAuthModal();
 document.getElementById("auth-login-btn").onclick = () => submitAuth("/api/login");
 document.getElementById("auth-register-btn").onclick = () => submitAuth("/api/register");
 document.getElementById("auth-cancel-btn").onclick = () => authModal.classList.remove("open");
@@ -3128,11 +3749,51 @@ function loadRepertoireFromLocal() {
   if (repTreeBuilt) updateRepTreeButtons();
 }
 
+function guestRepertoireSnapshot() {
+  try {
+    return normalizeRepData(JSON.parse(localStorage.getItem(REP_LS) || "{}"));
+  } catch (e) {
+    return { white: [], black: [] };
+  }
+}
+
+function mergeRepertoire(guest, server) {
+  // Union by color+play; server wins on name/eco conflicts.
+  const out = { white: [], black: [] };
+  for (const color of ["white", "black"]) {
+    const byPlay = new Map();
+    for (const e of guest[color] || []) byPlay.set(e.play, e);
+    for (const e of server[color] || []) byPlay.set(e.play, e);
+    out[color] = [...byPlay.values()];
+  }
+  return normalizeRepData(out);
+}
+
+function repertoireCount(data) {
+  return (data.white?.length || 0) + (data.black?.length || 0);
+}
+
 async function loadRepertoireFromServer() {
+  const guest = guestRepertoireSnapshot();
   try {
     const data = await api("/api/me/repertoire", "GET");
-    state.myRepertoire = normalizeRepData(data);
-    localStorage.setItem(REP_LS, JSON.stringify(state.myRepertoire));
+    const server = normalizeRepData(data);
+    if (repertoireCount(guest) > 0) {
+      const merged = mergeRepertoire(guest, server);
+      state.myRepertoire = merged;
+      localStorage.setItem(REP_LS, JSON.stringify(merged));
+      if (repertoireCount(merged) !== repertoireCount(server) ||
+          JSON.stringify(merged) !== JSON.stringify(server)) {
+        try {
+          await api("/api/me/repertoire", "PUT", merged);
+        } catch (e) {
+          console.warn("repertoire merge sync failed", e);
+        }
+      }
+    } else {
+      state.myRepertoire = server;
+      localStorage.setItem(REP_LS, JSON.stringify(server));
+    }
   } catch (e) {
     loadRepertoireFromLocal();
     return;
@@ -3264,6 +3925,7 @@ async function ensureRepTree() {
         const row = document.createElement("div");
         row.className = "rep-line";
         row.dataset.play = line.play;
+        row.title = "Replay opening on the board";
         row.innerHTML =
           `<span class="eco">${line.eco || ""}</span>` +
           `<span class="nm"></span>` +
@@ -3274,6 +3936,7 @@ async function ensureRepTree() {
           ev.stopPropagation();
           toggleRepOpening(line);
         };
+        row.onclick = () => previewRepOpening(line);
         famDet.appendChild(row);
       }
       moveDet.appendChild(famDet);
@@ -3352,6 +4015,35 @@ function renderPracticeList() {
   }
 }
 
+const REP_PREVIEW_PLIES = 10; // first 5 full moves
+
+function previewRepOpening(entry) {
+  // Click a repertoire-tree opening → animate its first moves onto the board.
+  stopPractice();
+  if (state.editMode) setEditMode(false);
+  const sans = uciToSanLine(entry.play);
+  if (!sans.length) return;
+  const g = new Chess();
+  for (const san of sans) {
+    try { g.move(san); } catch (e) { break; }
+  }
+  freeFen = null;
+  gameRootFen = START_FEN;
+  game = g;
+  rebuildDerived();
+  state.ply = 0;
+  state.moveFlags = [];
+  state.lastOpeningName = entry.name;
+  clearBoardPlayers();
+  setGameView(false);
+  state.orientation = state.repColor;
+  setBoardTitle(entry.name + (entry.eco ? ` (${entry.eco})` : ""));
+  document.querySelectorAll("#rep-tree .rep-line").forEach(el => {
+    el.classList.toggle("active-preview", el.dataset.play === entry.play);
+  });
+  animateLine(Math.min(REP_PREVIEW_PLIES, state.sans.length));
+}
+
 function loadRepLine(entry, enterPractice) {
   stopPractice();
   const sans = uciToSanLine(entry.play);
@@ -3385,7 +4077,7 @@ function stopPractice() {
 }
 
 function startPractice(entry) {
-  state.practiceLevel = +document.getElementById("rep-difficulty").value || 5;
+  state.practiceElo = +document.getElementById("rep-difficulty").value || 1800;
   loadRepLine(entry, true);
   const st = document.getElementById("rep-practice-status");
   if (state.repColor === "black") {
@@ -3429,7 +4121,7 @@ async function runPracticeReply() {
   try {
     const data = await api("/api/practice-move", "POST", {
       fen,
-      level: state.practiceLevel || +document.getElementById("rep-difficulty").value || 5,
+      elo: state.practiceElo || +document.getElementById("rep-difficulty").value || 1800,
     });
     if (!state.practiceMode) return;
     if (state.ply < state.sans.length) truncateToPly();
@@ -3485,11 +4177,12 @@ document.getElementById("rep-tab-black").onclick = () => {
   if (state.repertoireOpen) refreshBoard();
 };
 document.getElementById("rep-difficulty").onchange = e => {
-  state.practiceLevel = +e.target.value || 5;
+  state.practiceElo = +e.target.value || 1800;
 };
 
 /* ---------- init ---------- */
 
+initRecentUsernames();
 loadRepertoireFromLocal();
 rebuildDerived();
 refreshBoard();

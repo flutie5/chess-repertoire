@@ -17,6 +17,8 @@ services:
         generateValue: true
       - key: DATA_DIR
         value: /data
+      - key: GOOGLE_CLIENT_ID
+        sync: false
     disk:
       name: chess-repertoire-data
       mountPath: /data

@@ -160,7 +160,9 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
+                password_hash TEXT,
+                google_sub TEXT UNIQUE,
+                display_name TEXT NOT NULL DEFAULT '',
                 chesscom_username TEXT NOT NULL DEFAULT '',
                 lichess_username TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
@@ -179,9 +181,27 @@ def _init_db() -> None:
             )
             """
         )
+        _migrate_users(conn)
+
+
+def _migrate_users(conn: sqlite3.Connection) -> None:
+    """Additive migrations for existing SQLite installs."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "google_sub" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub "
+            "ON users(google_sub) WHERE google_sub IS NOT NULL"
+        )
+    if "display_name" not in cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"
+        )
 
 
 _init_db()
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 
 
 def _current_user() -> sqlite3.Row | None:
@@ -192,11 +212,22 @@ def _current_user() -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
 
 
+def _user_has_password(user: sqlite3.Row) -> bool:
+    pw = user["password_hash"]
+    return bool(pw)
+
+
 def _user_payload(user: sqlite3.Row) -> dict:
+    keys = user.keys()
+    display = user["display_name"] if "display_name" in keys else ""
+    google_sub = user["google_sub"] if "google_sub" in keys else None
     return {
         "email": user["email"],
+        "display_name": display or "",
         "chesscom_username": user["chesscom_username"],
         "lichess_username": user["lichess_username"],
+        "has_password": _user_has_password(user),
+        "auth_provider": "google" if google_sub else "password",
     }
 
 # In-memory cache of parsed games + move lists per (username, months).
@@ -423,7 +454,7 @@ def evaluate():
 
 @app.post("/api/practice-move")
 def practice_move():
-    """Return one Stockfish move at a reduced skill level for repertoire practice."""
+    """Return one Stockfish move at a reduced Elo for repertoire practice."""
     data = _json_body()
     fen = (data.get("fen") or "").strip()
     if not fen:
@@ -435,27 +466,45 @@ def practice_move():
     if board.is_game_over():
         return jsonify({"error": "game over"}), 400
 
+    # Prefer Elo (200-point steps). Legacy `level` 1..10 maps to ~1400..3200.
+    elo = data.get("elo")
+    if elo is None and data.get("level") is not None:
+        try:
+            level = max(1, min(10, int(data.get("level"))))
+        except (TypeError, ValueError):
+            level = 5
+        elo = 1200 + level * 200
     try:
-        level = int(data.get("level") or 5)
+        elo = int(elo if elo is not None else 1800)
     except (TypeError, ValueError):
-        level = 5
-    level = max(1, min(10, level))
-    skill = max(0, min(20, (level - 1) * 2))
-    depth = 3 + level  # 4..13
+        elo = 1800
+    # Stockfish UCI_Elo is typically ~1320–3190
+    elo = max(1320, min(3190, elo))
+    # Stronger opponents get a bit more search time/depth
+    depth = 6 + (elo - 1320) // 200  # ~6..15
+    think_time = 0.25 + (elo - 1320) / 2000.0  # ~0.25..1.2s
 
     with _engine_lock:
         engine = _get_engine()
         if engine is None:
             return jsonify({"error": "Stockfish engine not found"}), 503
         try:
-            engine.configure({"Skill Level": skill})
-            result = engine.play(board, chess.engine.Limit(depth=depth, time=0.4))
+            engine.configure({
+                "UCI_LimitStrength": True,
+                "UCI_Elo": elo,
+            })
+            result = engine.play(
+                board, chess.engine.Limit(depth=depth, time=think_time)
+            )
         except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
             _reset_engine()
             return jsonify({"error": f"engine failed: {exc}"}), 500
         finally:
             try:
-                engine.configure({"Skill Level": 20})
+                engine.configure({
+                    "UCI_LimitStrength": False,
+                    "Skill Level": 20,
+                })
             except Exception:
                 pass
 
@@ -906,6 +955,94 @@ def _json_body() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _login_user(user: sqlite3.Row) -> dict:
+    session.permanent = True
+    session["user_id"] = user["id"]
+    return _user_payload(user)
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    return jsonify({
+        "google_client_id": GOOGLE_CLIENT_ID or None,
+    })
+
+
+@app.post("/api/auth/google")
+def auth_google():
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Google sign-in is not configured on this server."}), 503
+
+    credential = (_json_body().get("credential") or "").strip()
+    if not credential:
+        return jsonify({"error": "Missing Google credential."}), 400
+
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+        info = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except Exception:
+        return jsonify({"error": "Invalid Google credential."}), 401
+
+    if info.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        return jsonify({"error": "Invalid Google credential."}), 401
+
+    sub = (info.get("sub") or "").strip()
+    email = (info.get("email") or "").strip().lower()
+    if not sub or not email:
+        return jsonify({"error": "Google account is missing email."}), 400
+    if not info.get("email_verified", False):
+        return jsonify({"error": "Google account email is not verified."}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "Google account email is invalid."}), 400
+
+    display_name = (info.get("name") or "").strip()[:120]
+
+    with _db() as conn:
+        user = conn.execute(
+            "SELECT * FROM users WHERE google_sub = ?", (sub,)
+        ).fetchone()
+        if user is None:
+            by_email = conn.execute(
+                "SELECT * FROM users WHERE email = ?", (email,)
+            ).fetchone()
+            if by_email is not None:
+                # Link Google to an existing email/password account.
+                conn.execute(
+                    "UPDATE users SET google_sub = ?, "
+                    "display_name = CASE WHEN COALESCE(display_name, '') = '' "
+                    "THEN ? ELSE display_name END WHERE id = ?",
+                    (sub, display_name, by_email["id"]),
+                )
+                user = conn.execute(
+                    "SELECT * FROM users WHERE id = ?", (by_email["id"],)
+                ).fetchone()
+            else:
+                # Empty string password_hash: Google-only (works with older NOT NULL schemas).
+                cur = conn.execute(
+                    "INSERT INTO users (email, password_hash, google_sub, display_name) "
+                    "VALUES (?, '', ?, ?)",
+                    (email, sub, display_name),
+                )
+                user = conn.execute(
+                    "SELECT * FROM users WHERE id = ?", (cur.lastrowid,)
+                ).fetchone()
+        elif display_name and not (user["display_name"] or "").strip():
+            conn.execute(
+                "UPDATE users SET display_name = ? WHERE id = ?",
+                (display_name, user["id"]),
+            )
+            user = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user["id"],)
+            ).fetchone()
+
+    return jsonify(_login_user(user))
+
+
 @app.post("/api/register")
 def register():
     data = _json_body()
@@ -926,13 +1063,13 @@ def register():
                 (email, generate_password_hash(password)),
             )
             user_id = cur.lastrowid
+            user = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
     except sqlite3.IntegrityError:
         return jsonify({"error": "An account with that email already exists."}), 409
 
-    session.permanent = True
-    session["user_id"] = user_id
-    return jsonify({"email": email, "chesscom_username": "",
-                    "lichess_username": ""}), 201
+    return jsonify(_login_user(user)), 201
 
 
 @app.post("/api/login")
@@ -947,12 +1084,14 @@ def login():
         user = conn.execute(
             "SELECT * FROM users WHERE email = ?", (email,)
         ).fetchone()
-    if user is None or not check_password_hash(user["password_hash"], password):
+    if user is None:
+        return jsonify({"error": "Incorrect email or password."}), 401
+    if not _user_has_password(user):
+        return jsonify({"error": "Use Google to sign in."}), 401
+    if not check_password_hash(user["password_hash"], password):
         return jsonify({"error": "Incorrect email or password."}), 401
 
-    session.permanent = True
-    session["user_id"] = user["id"]
-    return jsonify(_user_payload(user))
+    return jsonify(_login_user(user))
 
 
 @app.post("/api/logout")
@@ -1072,6 +1211,8 @@ def change_password():
         return jsonify({
             "error": f"New password must be at least {MIN_PASSWORD_LEN} characters."
         }), 400
+    if not _user_has_password(user):
+        return jsonify({"error": "This account uses Google sign-in."}), 400
     if not check_password_hash(user["password_hash"], current):
         return jsonify({"error": "Current password is incorrect."}), 401
     if current == new:

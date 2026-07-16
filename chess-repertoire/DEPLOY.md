@@ -46,8 +46,20 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | `FLASK_ENV` | `production` |
 | `SECRET_KEY` | Generate a random 64-char hex string (Render can auto-generate) |
 | `DATA_DIR` | `/data` |
+| `GOOGLE_CLIENT_ID` | OAuth 2.0 Web client ID from Google Cloud Console (for Sign in with Google) |
 
 Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom-cache` survive redeploys.
+
+### Google Sign-In setup
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
+2. Create an **OAuth client ID** of type **Web application**
+3. Authorized JavaScript origins:
+   - `http://127.0.0.1:5000` (local)
+   - `https://YOUR-SITE.netlify.app` (and custom domain if any)
+   - `https://YOUR-SERVICE.onrender.com` if you open the API host directly
+4. Copy the Client ID into Render as `GOOGLE_CLIENT_ID` (no client secret needed for the GIS ID-token flow)
+5. Redeploy the API so `/api/auth/config` returns the client ID
 
 Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 
@@ -92,6 +104,7 @@ No Render domain changes are required — only Netlify serves the public site; A
 - [ ] `https://YOUR-SERVICE.onrender.com/api/me` returns `401` JSON (not 502)
 - [ ] Netlify site loads at `https://YOUR-SITE.netlify.app`
 - [ ] Register / login works (session cookie on Netlify domain)
+- [ ] Continue with Google works (origins + `GOOGLE_CLIENT_ID` configured)
 - [ ] Analyze a username — report loads (chess.com fetch + cache)
 - [ ] Board eval bar works (Stockfish via `/api/eval`)
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
