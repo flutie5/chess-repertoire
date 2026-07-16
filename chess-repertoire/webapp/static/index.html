@@ -262,7 +262,8 @@
       linear-gradient(135deg, transparent 70%, var(--green) 70%, var(--green) 77%, transparent 77%);
   }
   #evalbar {
-    width: 20px; border-radius: var(--radius-sm); overflow: hidden;
+    width: 20px; height: var(--board-px); align-self: stretch;
+    border-radius: var(--radius-sm); overflow: hidden;
     background: #403d39; position: relative; flex: none;
     border: 1px solid var(--border-subtle);
   }
@@ -1141,7 +1142,7 @@
     <div class="edit-tools" id="edit-tools">
       <button type="button" id="edit-turn-w" title="White to play">White to play</button>
       <button type="button" id="edit-turn-b" title="Black to play">Black to play</button>
-      <button type="button" id="edit-clear" title="Clear board">Clear</button>
+      <button type="button" id="edit-clear" title="Wipe the board clean">Clear board</button>
     </div>
     <div class="nav">
       <button id="nav-start" title="Start">|&#8249;</button>
@@ -1827,7 +1828,6 @@ let evalToken = 0;
 const evalCache = new Map();
 
 function scheduleEval() {
-  if (engineAvailable === false) return;
   clearTimeout(evalTimer);
   if (typeof isAnimatingLine === "function" && isAnimatingLine()) return;   // no per-step evals while replaying a line
   const fen = currentFen();
@@ -1842,42 +1842,64 @@ function scheduleEval() {
     return;
   }
   if (evalCache.has(fen)) { renderEval(evalCache.get(fen)); return; }
+  enginePanel.classList.add("visible");
   labelEl.textContent = "Stockfish \u2014 thinking\u2026";
   evalTimer = setTimeout(() => fetchEval(fen), 200);
 }
 
 async function fetchEval(fen) {
   const token = ++evalToken;
+  const path = `/api/eval?fen=${encodeURIComponent(fen)}`;
   try {
-    const resp = await fetchApi(`/api/eval?fen=${encodeURIComponent(fen)}`);
+    await ensureApiBase();
+    let resp = await fetchApi(path);
+    let data;
+    try {
+      data = await readJson(resp);
+    } catch (e) {
+      // Netlify proxy miss / HTML error page — retry once against Render.
+      if (e.isProxyMiss && !apiBase) {
+        apiBase = RENDER_API;
+        resp = await fetchApi(path);
+        data = await readJson(resp);
+      } else {
+        throw e;
+      }
+    }
     if (resp.status === 503) {
-      engineAvailable = false;
-      enginePanel.classList.remove("visible");
+      engineAvailable = null;  // allow later retries (cold start / missing binary)
+      enginePanel.classList.add("visible");
+      labelEl.textContent = "Stockfish \u2014 " + (data.error || "engine unavailable");
       return;
     }
-    const data = await readJson(resp);
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     engineAvailable = true;
     evalCache.set(fen, data);
     if (token === evalToken && fen === currentFen()) renderEval(data);
   } catch (e) {
-    if (token === evalToken) labelEl.textContent = "Stockfish \u2014 " + e.message;
+    if (token === evalToken) {
+      enginePanel.classList.add("visible");
+      labelEl.textContent = "Stockfish \u2014 " + e.message;
+    }
   }
 }
 
 function renderEval(data) {
   enginePanel.classList.add("visible");
   let text, whiteShare;
-  if (data.mate !== null) {
+  if (data.mate != null) {
     text = (data.mate > 0 ? "M" : "-M") + Math.abs(data.mate);
     whiteShare = data.mate > 0 ? 1 : 0;
-  } else {
+  } else if (typeof data.cp === "number") {
     const p = data.cp / 100;
     text = (p > 0 ? "+" : "") + p.toFixed(1);
     whiteShare = 1 / (1 + Math.exp(-p / 1.5));   // squash to 0..1
+  } else {
+    text = "—";
+    whiteShare = 0.5;
   }
   scoreEl.textContent = text;
-  scoreEl.className = (data.mate !== null ? data.mate > 0 : data.cp >= 0)
+  scoreEl.className = (data.mate != null ? data.mate > 0 : (data.cp ?? 0) >= 0)
     ? "white-adv" : "black-adv";
   labelEl.textContent = `Stockfish \u2014 depth ${data.depth}`;
   // White is the light fill; pin it to the bottom when White sits there, otherwise the top

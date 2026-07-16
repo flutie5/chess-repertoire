@@ -265,8 +265,24 @@ def _get_engine() -> chess.engine.SimpleEngine | None:
         path = _engine_path()
         if path is None:
             return None
-        _engine = chess.engine.SimpleEngine.popen_uci(str(path))
+        try:
+            _engine = chess.engine.SimpleEngine.popen_uci(str(path))
+        except Exception as exc:
+            print(f"WARNING: failed to start Stockfish at {path}: {exc}", flush=True)
+            _engine = None
+            return None
     return _engine
+
+
+def _reset_engine_limits(engine: chess.engine.SimpleEngine) -> None:
+    """Clear practice-mode strength limits before a full-strength analyse."""
+    try:
+        engine.configure({
+            "UCI_LimitStrength": False,
+            "Skill Level": 20,
+        })
+    except Exception:
+        pass
 
 
 def _reset_engine():
@@ -421,35 +437,53 @@ def evaluate():
     if key in _eval_cache:
         return jsonify(_eval_cache[key])
 
-    with _engine_lock:
-        engine = _get_engine()
-        if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
-        try:
-            info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
-        except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
-            _reset_engine()
+    try:
+        with _engine_lock:
             engine = _get_engine()
             if engine is None:
                 return jsonify({"error": "Stockfish engine not found"}), 503
+            _reset_engine_limits(engine)
             try:
                 info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
-            except Exception as exc:
+            except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
                 _reset_engine()
-                return jsonify({"error": f"engine failed: {exc}"}), 500
+                engine = _get_engine()
+                if engine is None:
+                    return jsonify({"error": "Stockfish engine not found"}), 503
+                _reset_engine_limits(engine)
+                info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
 
-    score = info["score"].white()
-    pv = info.get("pv", [])
-    result = {
-        "cp": score.score(),                      # None if forced mate
-        "mate": score.mate(),                     # None unless forced mate
-        "depth": info.get("depth", EVAL_DEPTH),
-        "best_san": board.san(pv[0]) if pv else None,
-        "pv_san": board.variation_san(pv[:8]) if pv else "",
-        "turn": "white" if board.turn == chess.WHITE else "black",
-    }
-    _eval_cache[key] = result
-    return jsonify(result)
+        if "score" not in info:
+            return jsonify({"error": "engine returned no score"}), 500
+
+        score = info["score"].white()
+        pv = list(info.get("pv") or [])
+        best_san = None
+        pv_san = ""
+        if pv:
+            try:
+                best_san = board.san(pv[0])
+            except ValueError:
+                best_san = pv[0].uci()
+            try:
+                pv_san = board.variation_san(pv[:8])
+            except ValueError:
+                pv_san = " ".join(m.uci() for m in pv[:8])
+
+        result = {
+            "cp": score.score(),                      # None if forced mate
+            "mate": score.mate(),                     # None unless forced mate
+            "depth": info.get("depth", EVAL_DEPTH),
+            "best_san": best_san,
+            "pv_san": pv_san,
+            "turn": "white" if board.turn == chess.WHITE else "black",
+        }
+        _eval_cache[key] = result
+        return jsonify(result)
+    except Exception as exc:
+        _reset_engine()
+        print(f"WARNING: /api/eval failed for {fen!r}: {exc}", flush=True)
+        return jsonify({"error": f"engine failed: {exc}"}), 500
 
 
 @app.post("/api/practice-move")
