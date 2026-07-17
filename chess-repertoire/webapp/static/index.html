@@ -921,8 +921,10 @@
   }
   .rep-line .eco {
     font-size: 10px; color: var(--text-muted); font-weight: 700;
-    min-width: 2.4em;
+    min-width: 2.4em; cursor: copy; border-radius: 3px; padding: 1px 3px;
   }
+  .rep-line .eco:hover { color: var(--text-primary); background: rgba(255,255,255,.06); }
+  .rep-line .eco.copied { color: var(--green); }
   .rep-line .nm { flex: 1; min-width: 0; }
   .rep-line button {
     flex: none; background: none; border: 1px solid var(--border-subtle);
@@ -950,6 +952,28 @@
     background: var(--bg-input); color: var(--text-primary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     padding: 6px 10px; font-size: 13px;
+  }
+  #rep-randomize-btn {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #rep-randomize-btn:hover { border-color: var(--green); color: var(--green); }
+  #rep-randomize-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .color-choice-row {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .color-choice-row button {
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: 14px; font-weight: 700; cursor: pointer;
+    text-align: left;
+  }
+  .color-choice-row button:hover {
+    border-color: var(--green); background: var(--green-soft);
+  }
+  .color-choice-row button .hint {
+    display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 2px;
   }
   .rep-practice-list { display: flex; flex-direction: column; gap: 6px; }
   .rep-practice-row {
@@ -1103,6 +1127,33 @@
   </div>
 </section>
 
+<div class="modal-overlay" id="practice-color-modal" role="dialog" aria-labelledby="practice-color-title" aria-modal="true">
+  <div class="modal">
+    <h2 id="practice-color-title">Play as…</h2>
+    <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
+      Pick a side, then a random opening from your repertoire will start.
+    </p>
+    <div class="color-choice-row">
+      <button type="button" data-color="white">
+        White
+        <span class="hint">From your White repertoire</span>
+      </button>
+      <button type="button" data-color="black">
+        Black
+        <span class="hint">From your Black repertoire</span>
+      </button>
+      <button type="button" data-color="random">
+        Random
+        <span class="hint">White or Black at random</span>
+      </button>
+    </div>
+    <div class="form-msg" id="practice-color-msg"></div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="practice-color-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <main>
   <section class="board-panel">
     <div id="line-title">Analysis board</div>
@@ -1249,6 +1300,9 @@
           <option value="3000">3000 Elo</option>
         </select>
       </label>
+      <button type="button" id="rep-randomize-btn" title="Practice a random line from your repertoire">
+        Randomize
+      </button>
       <span id="rep-practice-status" class="rep-empty"></span>
     </div>
     <div class="rep-practice-list" id="rep-practice-list">
@@ -4107,9 +4161,18 @@ async function ensureRepTree() {
         row.dataset.play = line.play;
         row.title = "Replay opening on the board";
         row.innerHTML =
-          `<span class="eco">${line.eco || ""}</span>` +
+          `<span class="eco"></span>` +
           `<span class="nm"></span>` +
           `<button type="button"></button>`;
+        const ecoEl = row.querySelector(".eco");
+        ecoEl.textContent = line.eco || "";
+        if (line.eco) {
+          ecoEl.title = "Copy opening name";
+          ecoEl.onclick = ev => {
+            ev.stopPropagation();
+            copyOpeningName(line.name, ecoEl);
+          };
+        }
         row.querySelector(".nm").textContent = line.name;
         const btn = row.querySelector("button");
         btn.onclick = ev => {
@@ -4197,6 +4260,38 @@ function renderPracticeList() {
 
 const REP_PREVIEW_PLIES = 10; // first 5 full moves
 
+async function copyOpeningName(name, ecoEl) {
+  const text = String(name || "").trim();
+  if (!text) return;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    if (ecoEl) {
+      ecoEl.classList.add("copied");
+      const prev = ecoEl.title;
+      ecoEl.title = "Copied!";
+      clearTimeout(ecoEl._copyTimer);
+      ecoEl._copyTimer = setTimeout(() => {
+        ecoEl.classList.remove("copied");
+        ecoEl.title = prev || "Copy opening name";
+      }, 1200);
+    }
+  } catch (e) {
+    console.warn("Clipboard copy failed", e);
+  }
+}
+
 function previewRepOpening(entry) {
   // Click a repertoire-tree opening → animate its first moves onto the board.
   stopPractice();
@@ -4265,6 +4360,66 @@ function startPractice(entry) {
     schedulePracticeReply();
   } else if (st) {
     st.textContent = "Your move as White. Stockfish will reply.";
+  }
+}
+
+function repertoirePool(colorChoice) {
+  const white = (state.myRepertoire.white || []).map(e => ({ color: "white", entry: e }));
+  const black = (state.myRepertoire.black || []).map(e => ({ color: "black", entry: e }));
+  if (colorChoice === "white") return white;
+  if (colorChoice === "black") return black;
+  return white.concat(black);
+}
+
+function pickRandomRepertoireLine(colorChoice) {
+  const pool = repertoirePool(colorChoice);
+  if (!pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function openPracticeColorModal() {
+  const modal = document.getElementById("practice-color-modal");
+  const msg = document.getElementById("practice-color-msg");
+  if (msg) {
+    msg.textContent = "";
+    msg.classList.remove("error", "ok");
+  }
+  const total = repertoirePool("random").length;
+  if (!total) {
+    const st = document.getElementById("rep-practice-status");
+    if (st) st.textContent = "Add openings to your repertoire first.";
+    return;
+  }
+  modal.classList.add("open");
+}
+
+function closePracticeColorModal() {
+  document.getElementById("practice-color-modal").classList.remove("open");
+}
+
+function startRandomPractice(colorChoice) {
+  const msg = document.getElementById("practice-color-msg");
+  const picked = pickRandomRepertoireLine(colorChoice);
+  if (!picked) {
+    if (msg) {
+      msg.textContent = colorChoice === "random"
+        ? "No openings in your repertoire yet."
+        : `No openings saved for ${colorChoice}.`;
+      msg.classList.add("error");
+      msg.classList.remove("ok");
+    }
+    return;
+  }
+  closePracticeColorModal();
+  setRepColor(picked.color);
+  state.orientation = picked.color;
+  startPractice(picked.entry);
+  const st = document.getElementById("rep-practice-status");
+  if (st) {
+    const label = `${picked.entry.name}${picked.entry.eco ? ` (${picked.entry.eco})` : ""}`;
+    st.textContent = picked.color === "black"
+      ? `Random · ${label}. Stockfish (White) is thinking…`
+      : `Random · ${label}. Your move as White.`;
   }
 }
 
@@ -4359,6 +4514,14 @@ document.getElementById("rep-tab-black").onclick = () => {
 document.getElementById("rep-difficulty").onchange = e => {
   state.practiceElo = +e.target.value || 1800;
 };
+document.getElementById("rep-randomize-btn").onclick = () => openPracticeColorModal();
+document.getElementById("practice-color-cancel").onclick = () => closePracticeColorModal();
+document.getElementById("practice-color-modal").addEventListener("click", e => {
+  if (e.target.id === "practice-color-modal") closePracticeColorModal();
+});
+document.querySelectorAll("#practice-color-modal .color-choice-row button").forEach(btn => {
+  btn.onclick = () => startRandomPractice(btn.dataset.color);
+});
 
 /* ---------- init ---------- */
 
