@@ -1413,7 +1413,7 @@
   </div>
   <div class="auth-area">
     <button class="primary" id="analyze-me-btn" style="display:none">Analyze my games</button>
-    <button class="primary" id="my-repertoire-btn" type="button" title="Build and practice your openings">My Repertoire</button>
+    <button class="primary" id="my-repertoire-btn" type="button" title="Build and practice your openings (Pro — 3-day free trial)">My Repertoire</button>
     <button id="auth-open-btn" type="button">Log in / Sign up</button>
     <button id="user-menu-btn" style="display:none"></button>
     <div id="user-menu">
@@ -1438,18 +1438,19 @@
 
 <div class="modal-overlay" id="upgrade-modal" role="dialog" aria-labelledby="upgrade-title" aria-modal="true">
   <div class="modal">
-    <h2 id="upgrade-title">Unlock Pro</h2>
+    <h2 id="upgrade-title">Unlock My Repertoire</h2>
     <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
-      Game Review, Recent Slip-ups, and Practice vs Stockfish.
+      Build your openings, practice vs Stockfish, and track slip-ups.
+      Start with a <strong>3-day free trial</strong> — card required, cancel anytime.
     </p>
     <div class="upgrade-prices">
       <button type="button" id="upgrade-month-btn" data-interval="month">
         <span class="price">$6 / month</span>
-        <span class="hint">Cancel anytime</span>
+        <span class="hint">3-day free trial, then $6/mo</span>
       </button>
       <button type="button" id="upgrade-year-btn" class="featured" data-interval="year">
         <span class="price">$40 / year</span>
-        <span class="hint">Save ~$32 vs monthly</span>
+        <span class="hint">3-day free trial, then $40/yr</span>
       </button>
     </div>
     <div class="form-msg" id="upgrade-msg"></div>
@@ -4207,10 +4208,11 @@ function fillProfileForm(user) {
   const upBtn = document.getElementById("profile-upgrade-btn");
   const billBtn = document.getElementById("profile-billing-btn");
   const pro = !!user?.is_pro;
+  const trial = !!user?.is_trialing;
   const billingOn = !!user?.billing_enabled;
   if (badge) {
-    badge.textContent = pro ? "Pro" : "Free";
-    badge.classList.toggle("pro", pro);
+    badge.textContent = trial ? "Trial" : (pro ? "Pro" : "Free");
+    badge.classList.toggle("pro", pro || trial);
   }
   if (upBtn) upBtn.style.display = billingOn && !pro ? "" : "none";
   if (billBtn) billBtn.style.display = billingOn && pro ? "" : "none";
@@ -5852,6 +5854,16 @@ async function runPracticeReply() {
 }
 
 async function openRepertoire() {
+  // My Repertoire is the Pro product (with 3-day trial via Checkout).
+  if (!currentUser) {
+    setMsg(authMsg, "Sign in to use My Repertoire.", "error");
+    authModal.classList.add("open");
+    return;
+  }
+  if (currentUser.billing_enabled && !currentUser.is_pro) {
+    openUpgradeModal();
+    return;
+  }
   closeProfile();
   if (state.editMode) setEditMode(false);
   stopPractice();

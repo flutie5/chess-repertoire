@@ -21,7 +21,8 @@ POST /api/annotate-game runs a full-game Stockfish review and returns
 chess.com-style move annotations (blunder/mistake/great/best/brilliant).
 
 Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
-/api/billing/webhook. Pro gates annotate-*, scan-blunders, practice-move.
+/api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync and
+practice-move. Game review (annotate-*) stays free.
 """
 
 from __future__ import annotations
@@ -360,6 +361,9 @@ def _user_col(user: sqlite3.Row, name: str, default=None):
     return user[name] if name in keys else default
 
 
+TRIAL_DAYS = 3
+
+
 def _is_pro(user: sqlite3.Row | None) -> bool:
     if user is None:
         return False
@@ -406,6 +410,8 @@ def _user_payload(user: sqlite3.Row) -> dict:
     plan = _user_col(user, "plan") or "free"
     plan_interval = _user_col(user, "plan_interval")
     plan_status = _user_col(user, "plan_status")
+    plan_expires_at = _user_col(user, "plan_expires_at")
+    is_pro = _is_pro(user) or not _billing_configured()
     return {
         "email": user["email"],
         "display_name": display or "",
@@ -416,8 +422,11 @@ def _user_payload(user: sqlite3.Row) -> dict:
         "plan": plan,
         "plan_interval": plan_interval,
         "plan_status": plan_status,
-        "is_pro": _is_pro(user) or not _billing_configured(),
+        "plan_expires_at": plan_expires_at,
+        "is_pro": is_pro,
+        "is_trialing": (plan_status or "").lower() == "trialing" and is_pro,
         "billing_enabled": _billing_configured(),
+        "trial_days": TRIAL_DAYS,
     }
 
 # In-memory cache of parsed games + move lists per (username, months).
@@ -811,10 +820,8 @@ def scan_blunders():
       player_only?: bool (default true — only flag the player whose color is set)
     }
     Caps the batch to keep Render-friendly response times.
+    Free on Analyze; My Repertoire UI is Pro-gated separately.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     games_in = data.get("games")
     if not isinstance(games_in, list) or not games_in:
@@ -895,10 +902,8 @@ def annotate_game():
     """Full-game Stockfish review with chess.com-style move badges.
 
     Body: { san: ["e4", "c5", ...], depth?: int }
+    Free for everyone — Pro gates My Repertoire instead.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     san = data.get("san") or []
     if not isinstance(san, list) or not san:
@@ -949,10 +954,8 @@ def annotate_ply():
     """Classify a single exploratory move (position before + SAN).
 
     Body: { fen: "...", san: "h4", ply?: int, depth?: int }
+    Free for everyone — Pro gates My Repertoire instead.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     fen = (data.get("fen") or "").strip()
     san = (data.get("san") or "").strip()
@@ -1042,6 +1045,7 @@ def _subscription_as_dict(subscription) -> dict:
             "status": subscription.get("status") or "",
             "customer": subscription.get("customer"),
             "current_period_end": subscription.get("current_period_end"),
+            "trial_end": subscription.get("trial_end"),
             "price_id": price_id,
             "metadata": subscription.get("metadata") or {},
         }
@@ -1066,6 +1070,7 @@ def _subscription_as_dict(subscription) -> dict:
         "status": getattr(subscription, "status", None) or "",
         "customer": customer,
         "current_period_end": getattr(subscription, "current_period_end", None),
+        "trial_end": getattr(subscription, "trial_end", None),
         "price_id": price_id,
         "metadata": meta,
     }
@@ -1087,6 +1092,8 @@ def _apply_subscription_to_user(
     customer = sub.get("customer") or stripe_customer_id
     interval = _interval_for_price(sub.get("price_id"))
     period_end = sub.get("current_period_end")
+    trial_end = sub.get("trial_end")
+    expires = trial_end if status == "trialing" and trial_end else period_end
     plan = "pro" if status in ("active", "trialing", "past_due") else "free"
 
     where = ""
@@ -1117,7 +1124,7 @@ def _apply_subscription_to_user(
             plan,
             interval,
             status,
-            int(period_end) if period_end else None,
+            int(expires) if expires else None,
             *args,
         ),
     )
@@ -1125,7 +1132,10 @@ def _apply_subscription_to_user(
 
 @app.post("/api/billing/checkout")
 def billing_checkout():
-    """Create a Stripe Checkout Session for Pro (month or year)."""
+    """Create a Stripe Checkout Session for Pro (month or year).
+
+    New subscribers get a TRIAL_DAYS free trial (card collected, charged after).
+    """
     if not _billing_configured():
         return jsonify({"error": "Billing is not configured"}), 503
     user, err = _require_login()
@@ -1142,7 +1152,12 @@ def billing_checkout():
 
     base = _app_base_url()
     customer_id = _user_col(user, "stripe_customer_id")
+    # First-time subscribers get a 3-day trial; returning customers do not.
+    offer_trial = not _user_col(user, "stripe_subscription_id")
     try:
+        sub_data = {"metadata": {"user_id": str(user["id"])}}
+        if offer_trial:
+            sub_data["trial_period_days"] = TRIAL_DAYS
         params = {
             "mode": "subscription",
             "line_items": [{"price": price_id, "quantity": 1}],
@@ -1150,9 +1165,7 @@ def billing_checkout():
             "cancel_url": f"{base}/?billing=cancel",
             "client_reference_id": str(user["id"]),
             "metadata": {"user_id": str(user["id"])},
-            "subscription_data": {
-                "metadata": {"user_id": str(user["id"])},
-            },
+            "subscription_data": sub_data,
             "allow_promotion_codes": True,
         }
         email = (user["email"] or "").strip()
@@ -1802,17 +1815,17 @@ def _repertoire_payload(user_id: int) -> dict:
 
 @app.get("/api/me/repertoire")
 def get_repertoire():
-    user = _current_user()
-    if user is None:
-        return jsonify({"error": "not logged in"}), 401
+    user, err = _require_pro()
+    if err:
+        return err
     return jsonify(_repertoire_payload(user["id"]))
 
 
 @app.put("/api/me/repertoire")
 def put_repertoire():
-    user = _current_user()
-    if user is None:
-        return jsonify({"error": "not logged in"}), 401
+    user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     items = []
     for color in ("white", "black"):
