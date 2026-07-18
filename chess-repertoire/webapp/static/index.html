@@ -3826,9 +3826,11 @@ function sleep(ms) {
 }
 
 async function fetchApi(path, opts = {}) {
+  // Always include cookies — needed for auth via Netlify proxy and for
+  // direct Render fallback (CORS must allow credentials on the API).
   const resp = await fetch(apiUrl(path), {
-    credentials: apiBase ? "omit" : "same-origin",
     ...opts,
+    credentials: "include",
   });
   return resp;
 }
@@ -4339,6 +4341,13 @@ async function startCheckout(interval) {
     }
     setMsg(upgradeMsg, "No checkout URL returned.", "error");
   } catch (e) {
+    if (e?.code === "login_required" || e?.status === 401) {
+      closeUpgradeModal();
+      setUser(null);
+      setMsg(authMsg, "Session expired — sign in again to upgrade.", "error");
+      authModal.classList.add("open");
+      return;
+    }
     setMsg(upgradeMsg, e.message || "Checkout failed", "error");
   }
 }

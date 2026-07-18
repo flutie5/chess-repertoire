@@ -92,36 +92,58 @@ EVAL_DEPTH = 16
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
+# None is required for credentialed cross-origin calls (Netlify/custom domain → Render).
+# Same-origin Netlify /api proxy still works with None + Secure.
 if IS_PRODUCTION:
     app.config.update(
         SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SAMESITE="None",
     )
 
+PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
+
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
-if _cors_origins:
+_cors_origin_list = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+if PUBLIC_APP_URL and PUBLIC_APP_URL not in _cors_origin_list:
+    _cors_origin_list.append(PUBLIC_APP_URL)
+if _cors_origin_list:
     from flask_cors import CORS
 
     CORS(
         app,
-        resources={r"/api/*": {"origins": [o.strip() for o in _cors_origins.split(",") if o.strip()]}},
+        resources={r"/api/*": {"origins": _cors_origin_list}},
         supports_credentials=True,
     )
 
 
-@app.after_request
-def _cors_netlify_fallback(resp):
-    """Allow Netlify frontends to call the Render API if the /api proxy is broken."""
-    if "Access-Control-Allow-Origin" in resp.headers:
-        return resp
-    origin = request.headers.get("Origin") or ""
+def _origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if origin in _cors_origin_list:
+        return True
     if (
         origin.endswith(".netlify.app")
         or origin.endswith(".netlify.com")
         or origin.startswith("http://127.0.0.1:")
         or origin.startswith("http://localhost:")
     ):
+        return True
+    # Production custom domains (e.g. opening-explorer.com)
+    if PUBLIC_APP_URL and origin == PUBLIC_APP_URL:
+        return True
+    if origin in ("https://opening-explorer.com", "https://www.opening-explorer.com"):
+        return True
+    return False
+
+
+@app.after_request
+def _cors_netlify_fallback(resp):
+    """Allow frontends to call the Render API if the /api proxy is broken."""
+    if "Access-Control-Allow-Origin" in resp.headers:
+        return resp
+    origin = request.headers.get("Origin") or ""
+    if _origin_allowed(origin):
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
@@ -266,7 +288,6 @@ STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "").strip()
 STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY", "").strip()
-PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
 
 
 def _stripe_secret_ok(key: str) -> bool:
@@ -277,6 +298,13 @@ def _stripe_secret_ok(key: str) -> bool:
         print(
             "WARNING: STRIPE_SECRET_KEY has non-ASCII characters "
             "(often a pasted '…'). Re-copy the full key from Stripe.",
+            flush=True,
+        )
+        return False
+    if key.startswith("pk_test_") or key.startswith("pk_live_"):
+        print(
+            "WARNING: STRIPE_SECRET_KEY is a publishable key (pk_…). "
+            "Use the Secret key (sk_test_ or sk_live_) from Stripe → API keys.",
             flush=True,
         )
         return False
