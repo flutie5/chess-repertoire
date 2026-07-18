@@ -3,7 +3,9 @@
 import chess
 
 from repertoire.classify import (
+    MoveAnnotation,
     MoveFlag,
+    cap_top_choice_annotations,
     classify_annotation,
     classify_severity,
     find_patterns,
@@ -152,3 +154,20 @@ def test_material_equal_trade_not_sacrifice():
 
 def test_material_balance_startpos():
     assert material_balance(chess.Board(), chess.WHITE) == 0
+
+
+def test_cap_top_choice_one_best_or_great_per_game():
+    anns = [
+        MoveAnnotation(2, "Nf3", "best", 0, "Nf3", "white"),
+        MoveAnnotation(4, "Bc4", "great", 0, "Bc4", "white"),
+        MoveAnnotation(6, "Qh5", "blunder", 300, "d4", "white"),
+        MoveAnnotation(8, "Ng5", "best", 0, "Ng5", "white"),
+        MoveAnnotation(10, "Bxf7", "brilliant", 0, "Bxf7", "white"),
+    ]
+    capped = cap_top_choice_annotations(anns)
+    sevs = [a.severity for a in capped]
+    assert sevs.count("best") + sevs.count("great") == 1
+    assert sevs[0] == "best"
+    assert "blunder" in sevs
+    assert "brilliant" in sevs
+    assert len(capped) == 3

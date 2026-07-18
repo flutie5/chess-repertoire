@@ -15,7 +15,7 @@ import requests
 
 BASE = "https://api.chess.com/pub"
 DEFAULT_UA = (
-    "ChessRepertoireExplorer/1.0 "
+    "OpeningExplorer/1.0 "
     "(https://github.com/flutie5/chess-repertoire; personal opening analysis)"
 )
 REQUEST_DELAY_SECONDS = 0.5  # be polite; chess.com asks for serial access
