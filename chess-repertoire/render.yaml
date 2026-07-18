@@ -1,4 +1,4 @@
-# Render Blueprint — Chess Repertoire API backend
+# Render Blueprint — Opening Explorer API backend
 # https://render.com/docs/blueprint-spec
 services:
   - type: web

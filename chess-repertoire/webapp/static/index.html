@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chess Repertoire Explorer</title>
+<title>Opening Explorer — Become Brilliant</title>
 <link rel="icon" href="data:,">
 <style>
   :root, html[data-board-theme="blue"] {
@@ -928,6 +928,37 @@
   #upgrade-modal .upgrade-prices button.featured {
     border-color: var(--green); background: var(--green-soft);
   }
+  #intro-modal .modal {
+    width: min(92vw, 400px);
+    text-align: center;
+    align-items: center;
+    gap: 14px;
+  }
+  #intro-modal .intro-brand {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  #intro-modal .intro-brand span { color: var(--green); }
+  #intro-modal .intro-headline {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  #intro-modal .intro-body {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text-muted);
+    max-width: 32em;
+  }
+  #intro-modal .modal-actions {
+    width: 100%;
+    margin-top: 4px;
+  }
   .pro-chip {
     display: inline-block; margin-left: 8px;
     font-size: 10px; font-weight: 800; letter-spacing: .06em;
@@ -1075,14 +1106,35 @@
   .theme-swatch[data-theme="grey"]  { --p-light: #e6e6e6; --p-dark: #6e6e6e; }
 
   /* ---- my repertoire ---- */
+  /* Primary conversion CTA — stronger than other header primaries */
   #my-repertoire-btn {
-    background: var(--bg-card); color: var(--text-primary);
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-    padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
   }
-  #my-repertoire-btn:hover { border-color: var(--green); background: var(--bg-card-hover); }
   #my-repertoire-btn.active {
-    background: var(--green); color: #fff; border-color: var(--green);
+    outline: 2px solid var(--green-soft-4);
+    outline-offset: 2px;
+  }
+  #auth-open-btn {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: none;
+  }
+  #auth-open-btn:hover {
+    border-color: var(--green);
+    background: var(--bg-card-hover);
+  }
+  #auth-open-btn:active {
+    transform: none;
+    box-shadow: none;
   }
   body.repertoire-open #analyze-sidebar { display: none; }
   body.repertoire-open #repertoire-sidebar { display: flex; }
@@ -1352,7 +1404,7 @@
 <body>
 
 <header>
-  <h1><a href="/" id="home-link" title="Home">Chess Repertoire <span>Explorer</span></a></h1>
+  <h1><a href="/" id="home-link" title="Home">Opening <span>Explorer</span></a></h1>
   <div class="controls">
     <input id="username" type="text" list="username-recent" placeholder="chess.com username" spellcheck="false" autocomplete="off">
     <datalist id="username-recent"></datalist>
@@ -1361,8 +1413,8 @@
   </div>
   <div class="auth-area">
     <button class="primary" id="analyze-me-btn" style="display:none">Analyze my games</button>
-    <button id="my-repertoire-btn" type="button" title="Build and practice your openings">My Repertoire</button>
-    <button class="primary" id="auth-open-btn">Log in / Sign up</button>
+    <button class="primary" id="my-repertoire-btn" type="button" title="Build and practice your openings">My Repertoire</button>
+    <button id="auth-open-btn" type="button">Log in / Sign up</button>
     <button id="user-menu-btn" style="display:none"></button>
     <div id="user-menu">
       <button id="menu-profile">Profile</button>
@@ -1370,6 +1422,19 @@
     </div>
   </div>
 </header>
+
+<div class="modal-overlay" id="intro-modal" role="dialog" aria-labelledby="intro-headline" aria-modal="true">
+  <div class="modal">
+    <p class="intro-brand">Opening <span>Explorer</span></p>
+    <h2 class="intro-headline" id="intro-headline">Become Brilliant</h2>
+    <p class="intro-body">
+      Through analytics and planning, we help chess players win the opening stage of every game.
+    </p>
+    <div class="modal-actions">
+      <button class="primary" type="button" id="intro-start-btn">Get started</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="upgrade-modal" role="dialog" aria-labelledby="upgrade-title" aria-modal="true">
   <div class="modal">
@@ -2002,7 +2067,22 @@ async function scheduleExploreAnnotate(ply, fenBefore, san) {
       if (state.sans[ply - 1] !== san) return;
     }
     if (data.annotation && ANN_GLYPH[data.annotation.severity]) {
-      state.exploreAnns[ply] = data.annotation;
+      const sev = data.annotation.severity;
+      // At most one best/great ("engine top choice") badge per game view.
+      if (sev === "best" || sev === "great") {
+        const hasTop = (state.moveFlags || []).some(
+          f => f.severity === "best" || f.severity === "great"
+        ) || Object.entries(state.exploreAnns || {}).some(
+          ([k, f]) => f && (f.severity === "best" || f.severity === "great") && +k !== ply
+        );
+        if (hasTop) {
+          delete state.exploreAnns[ply];
+        } else {
+          state.exploreAnns[ply] = data.annotation;
+        }
+      } else {
+        state.exploreAnns[ply] = data.annotation;
+      }
     } else {
       delete state.exploreAnns[ply];
     }
@@ -2747,7 +2827,7 @@ function makeFigurineMoveEl(san, ply, flag) {
       el.title = `${label}: lost ${(flag.loss_cp / 100).toFixed(1)}` +
         (flag.best_san ? ` (better: ${flag.best_san})` : "");
     } else {
-      el.title = label + (flag.best_san ? ` · engine: ${flag.best_san}` : "");
+      el.title = label;
     }
   }
   el.onclick = () => { state.ply = ply; refreshBoard(); };
@@ -2938,7 +3018,17 @@ function applyBoardPx(px) {
   return px;
 }
 
+function syncHeaderToEvalbar() {
+  // Flush "Opening Explorer" with the left edge of the eval bar.
+  const evalbar = document.getElementById("evalbar");
+  const header = document.querySelector("header");
+  if (!evalbar || !header) return;
+  const left = Math.round(evalbar.getBoundingClientRect().left);
+  header.style.paddingLeft = (left > 8 ? left : 22) + "px";
+}
+
 function syncSidebarToBoard() {
+  syncHeaderToEvalbar();
   const sidebar = document.getElementById("analyze-sidebar");
   const boardRow = document.querySelector(".board-row");
   if (!sidebar || !boardPanel || !boardRow) return;
@@ -4156,6 +4246,51 @@ async function api(path, method, body) {
     throw err;
   }
   return data;
+}
+
+/* ---------- Intro welcome ---------- */
+
+const INTRO_SEEN_KEY = "introSeen";
+const introModal = document.getElementById("intro-modal");
+
+function markIntroSeen() {
+  try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch (e) { /* ignore */ }
+}
+
+function closeIntroModal() {
+  introModal?.classList.remove("open");
+  markIntroSeen();
+}
+
+function openIntroModal() {
+  introModal?.classList.add("open");
+}
+
+function initIntroModal() {
+  document.getElementById("intro-start-btn")?.addEventListener("click", closeIntroModal);
+  introModal?.addEventListener("click", e => {
+    if (e.target === introModal) closeIntroModal();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && introModal?.classList.contains("open")) {
+      closeIntroModal();
+    }
+  });
+
+  let seen = false;
+  try { seen = localStorage.getItem(INTRO_SEEN_KEY) === "1"; } catch (e) { /* ignore */ }
+  if (seen) return;
+
+  // Skip when returning from Stripe Checkout
+  try {
+    if (new URLSearchParams(window.location.search).has("billing")) return;
+  } catch (e) { /* ignore */ }
+
+  // Don't fight auth/upgrade if somehow already open
+  if (document.getElementById("auth-modal")?.classList.contains("open")) return;
+  if (document.getElementById("upgrade-modal")?.classList.contains("open")) return;
+
+  openIntroModal();
 }
 
 /* ---------- Pro / Stripe upgrade ---------- */
@@ -5803,6 +5938,7 @@ function initBoardTheme() {
 }
 
 initBoardTheme();
+initIntroModal(); // before billing URL cleanup so ?billing= can skip intro
 initBillingUi();
 initRecentUsernames();
 loadRepertoireFromLocal();

@@ -1,1 +1,1 @@
-"""Chess Repertoire Explorer web application."""
+"""Opening Explorer web application."""

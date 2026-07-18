@@ -1,4 +1,4 @@
-"""Web UI for the chess repertoire builder.
+"""Web UI for Opening Explorer.
 
 Run:
     python webapp/app.py

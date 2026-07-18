@@ -428,6 +428,24 @@ def annotate_ply(
     )
 
 
+def cap_top_choice_annotations(
+    annotations: list[MoveAnnotation],
+) -> list[MoveAnnotation]:
+    """Keep at most one best/great badge per game (engine top-choice praise).
+
+    Blunders, mistakes, and brilliants are unaffected.
+    """
+    kept_top = False
+    out: list[MoveAnnotation] = []
+    for ann in annotations:
+        if ann.severity in ("best", "great"):
+            if kept_top:
+                continue
+            kept_top = True
+        out.append(ann)
+    return out
+
+
 def annotate_game(
     engine: chess.engine.SimpleEngine,
     san_moves: list[str],
@@ -462,4 +480,4 @@ def annotate_game(
             # Illegal / failed push — stop.
             break
 
-    return annotations
+    return cap_top_choice_annotations(annotations)

@@ -1,4 +1,6 @@
-# Chess Repertoire Builder
+# Opening Explorer
+
+**Become Brilliant.**
 
 Pulls your chess.com game history, maps the openings you're actually facing, scores your performance in each, and generates a concrete repertoire targeting the lines that are costing you the most rating.
 
