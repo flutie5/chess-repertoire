@@ -82,6 +82,12 @@
     font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
     min-height: 100vh;
   }
+  :focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+  }
+  button:focus:not(:focus-visible),
+  [role="button"]:focus:not(:focus-visible) { outline: none; }
   header {
     display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     padding: 14px 22px; background: var(--bg-card);
@@ -103,12 +109,13 @@
   input[type=text]:focus { border-color: var(--green); }
   .tc-group { display: flex; gap: 6px; width: 100%; }
   .tc-group label {
-    flex: 1; text-align: center; padding: 8px; cursor: pointer;
+    flex: 1; text-align: center; padding: 9px 8px; cursor: pointer;
     font-size: 14px; font-weight: 700; user-select: none;
     background: var(--bg-card); color: var(--text-muted);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
   }
-  .tc-group label:hover { background: var(--bg-card-hover); }
+  .tc-group label:hover { background: var(--bg-card-hover); color: var(--text-primary); }
   .tc-group input { display: none; }
   .tc-group label:has(input:checked) {
     background: var(--green); color: #fff; border-color: var(--green);
@@ -141,7 +148,12 @@
     --board-px: 560px;
     display: flex; flex-direction: column; align-items: center; gap: 12px;
   }
-  #line-title { font-weight: 700; text-align: center; min-height: 22px; }
+  #line-title {
+    font-weight: 700; text-align: center; min-height: 22px;
+    max-width: calc(var(--board-px) + 30px);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-primary);
+  }
   .material-tray {
     display: flex; align-items: center; gap: 6px;
     width: calc(var(--board-px) + 30px); min-height: 28px;
@@ -379,8 +391,7 @@
   }
   #close-game-btn:hover { border-color: var(--green); background: #353330; }
   body.game-view #close-game-btn { display: block; }
-  body.game-view #range-wrap,
-  body.game-view #tc-group,
+  body.game-view #analyze-sidebar .sidebar-filters,
   body.game-view #summary,
   body.game-view #opening-sort,
   body.game-view #openings { display: none !important; }
@@ -391,6 +402,7 @@
     border-radius: 0;
     margin: -8px -4px -8px 0;
     padding: 8px 0 0;
+    --sidebar-align-pad: 0px;
   }
   body.game-view #analyze-sidebar .color-tabs {
     margin: 0 12px; gap: 8px;
@@ -471,10 +483,20 @@
   .game-panel-nav button:hover { background: #3d3a37; color: #fff; }
 
   /* ---- sidebar ---- */
-  .sidebar { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .sidebar { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   #analyze-sidebar {
     position: relative;
     width: 100%;
+    /* Aligns first filter (time controls) with the board top */
+    padding-top: var(--sidebar-align-pad, 0px);
+    transition: padding-top .12s ease;
+  }
+  #analyze-sidebar .sidebar-filters {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #analyze-sidebar .filter-label {
+    margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--text-muted);
   }
   #sidebar-resize {
     position: absolute; top: 0; right: -6px; bottom: 0;
@@ -560,25 +582,32 @@
     flex: 1; background: var(--bg-card); color: var(--text-muted);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
     padding: 8px; font-size: 14px; font-weight: 700; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
   }
+  .color-tabs button:hover { background: var(--bg-card-hover); color: var(--text-primary); }
   .color-tabs button.active { background: var(--green); color: #fff; border-color: var(--green); }
-  #summary { color: var(--text-muted); font-size: 13px; }
+  #summary {
+    color: var(--text-secondary); font-size: 13px; font-weight: 600;
+    padding: 2px 2px 0; min-height: 1.2em;
+  }
   .sort-tabs {
-    display: flex; gap: 6px; margin: 2px 0 4px;
+    display: flex; gap: 6px; margin: 0;
   }
   .sort-tabs button {
     flex: 1; background: var(--bg-card); color: var(--text-secondary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-    padding: 6px 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+    padding: 7px 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
   }
   .sort-tabs button:hover { border-color: var(--green); color: var(--text-primary); }
   .sort-tabs button.active {
-    background: var(--bg-card-hover); color: var(--text-primary);
+    background: var(--green-soft); color: var(--text-primary);
     border-color: var(--green);
   }
   #openings {
     display: flex; flex-direction: column; gap: 8px;
-    max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 4px;
+    max-height: calc(100vh - 260px); overflow-y: auto; padding-right: 4px;
+    scrollbar-gutter: stable;
   }
   #openings::-webkit-scrollbar { width: 8px; }
   #openings::-webkit-scrollbar-thumb { background: var(--bg-card-hover); border-radius: 4px; }
@@ -708,7 +737,22 @@
     color: var(--green); cursor: pointer;
   }
   .game-more:hover { background: var(--bg-card-hover); }
-  .empty-note { color: var(--text-muted); text-align: center; padding: 30px 10px; }
+  .empty-note {
+    color: var(--text-muted); text-align: center;
+    padding: 28px 16px; line-height: 1.5;
+    background: var(--bg-card); border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius);
+  }
+  .empty-note strong {
+    display: block; color: var(--text-primary); font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .empty-note p { margin: 0; font-size: 13px; }
+  .empty-note kbd {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    font-size: 12px; color: var(--text-secondary);
+  }
 
   /* ---- accounts ---- */
   .auth-area { margin-left: auto; display: flex; align-items: center; gap: 10px; position: relative; }
@@ -1245,45 +1289,50 @@
   </section>
 
   <aside class="sidebar" id="analyze-sidebar">
-    <div class="range-wrap" id="range-wrap">
-      <button id="range-btn" type="button">
-        <span class="cal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg></span>
-        <span class="range-label" id="range-label">Last 30 days</span>
-        <span class="range-chev">&#9660;</span>
-      </button>
-      <div id="range-panel">
-        <button class="preset selected" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
-        <button class="preset" type="button" data-preset="3m"><span class="tick">&#10003;</span>Last 3 months</button>
-        <button class="preset" type="button" data-preset="6m"><span class="tick">&#10003;</span>Last 6 months</button>
-        <button class="preset" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
-        <button class="preset" type="button" data-preset="ytd"><span class="tick">&#10003;</span>This year</button>
-        <button class="preset" type="button" data-preset="all"><span class="tick">&#10003;</span>All time</button>
-        <div class="range-custom">
-          <div class="rc-title">Custom range</div>
-          <div class="rc-row"><span>From</span><input type="date" id="range-from"></div>
-          <div class="rc-row"><span>To</span><input type="date" id="range-to"></div>
-          <div id="range-msg"></div>
-          <button id="range-apply" type="button">Apply</button>
+    <div class="sidebar-filters" id="sidebar-filters">
+      <div class="tc-group" id="tc-group" role="group" aria-label="Time controls">
+        <label title="Include rapid games"><input type="checkbox" value="rapid" checked>Rapid</label>
+        <label title="Include blitz games"><input type="checkbox" value="blitz" checked>Blitz</label>
+        <label title="Include bullet games"><input type="checkbox" value="bullet" checked>Bullet</label>
+      </div>
+      <div class="range-wrap" id="range-wrap">
+        <button id="range-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose date range">
+          <span class="cal"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M1.5 6h13M5 1v3M11 1v3"/></svg></span>
+          <span class="range-label" id="range-label">Last 30 days</span>
+          <span class="range-chev">&#9660;</span>
+        </button>
+        <div id="range-panel" role="listbox" aria-label="Date range presets">
+          <button class="preset selected" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
+          <button class="preset" type="button" data-preset="3m"><span class="tick">&#10003;</span>Last 3 months</button>
+          <button class="preset" type="button" data-preset="6m"><span class="tick">&#10003;</span>Last 6 months</button>
+          <button class="preset" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
+          <button class="preset" type="button" data-preset="ytd"><span class="tick">&#10003;</span>This year</button>
+          <button class="preset" type="button" data-preset="all"><span class="tick">&#10003;</span>All time</button>
+          <div class="range-custom">
+            <div class="rc-title">Custom range</div>
+            <div class="rc-row"><span>From</span><input type="date" id="range-from"></div>
+            <div class="rc-row"><span>To</span><input type="date" id="range-to"></div>
+            <div id="range-msg"></div>
+            <button id="range-apply" type="button">Apply</button>
+          </div>
         </div>
       </div>
-    </div>
-    <div class="tc-group" id="tc-group">
-      <label><input type="checkbox" value="rapid" checked>Rapid</label>
-      <label><input type="checkbox" value="blitz" checked>Blitz</label>
-      <label><input type="checkbox" value="bullet" checked>Bullet</label>
-    </div>
-    <div class="color-tabs">
-      <button id="tab-white" class="active">As White</button>
-      <button id="tab-black">As Black</button>
+      <div class="color-tabs" role="tablist" aria-label="Play as">
+        <button id="tab-white" class="active" type="button" role="tab" aria-selected="true">As White</button>
+        <button id="tab-black" type="button" role="tab" aria-selected="false">As Black</button>
+      </div>
     </div>
     <button type="button" id="close-game-btn" title="Return to opening list">Close game</button>
-    <div id="summary"></div>
-    <div class="sort-tabs" id="opening-sort" hidden>
+    <div id="summary" aria-live="polite"></div>
+    <div class="sort-tabs" id="opening-sort" hidden role="group" aria-label="Sort openings">
       <button type="button" data-sort="frequent" class="active" title="Sort by how often you play each opening">Most played</button>
       <button type="button" data-sort="recent" title="Sort by when you last played each opening">Most recent</button>
     </div>
     <div id="openings">
-      <div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>
+      <div class="empty-note">
+        <strong>Ready to analyze</strong>
+        <p>Enter a chess.com username above and click <kbd>Analyze</kbd> to see the openings you actually play.</p>
+      </div>
     </div>
     <div id="game-panel" aria-label="Game moves">
       <div id="game-opening-title"></div>
@@ -1786,6 +1835,7 @@ function setBoardPlayersFromGame(g) {
 function clearBoardPlayers() {
   state.boardPlayers = null;
   renderPlayerStrips();
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 function refreshBoard() {
@@ -2086,6 +2136,7 @@ function setEditMode(on) {
   // Collapse move history into a single custom root so free placement is the new start.
   setCustomFen(currentFen());
   if (state.editMode) updateEditTurnBtns();
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 editPosBtn.onclick = () => setEditMode(!state.editMode);
@@ -2242,6 +2293,7 @@ function setGameView(on, game) {
     if (titleEl) titleEl.textContent = title;
   }
   renderMoveList();
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 function closeGameView() {
@@ -2393,7 +2445,27 @@ function applyBoardPx(px) {
   const max = Math.min(BOARD_PX_MAX, Math.max(BOARD_PX_MIN, window.innerWidth - 48));
   px = Math.round(Math.min(max, Math.max(BOARD_PX_MIN, px)));
   boardPanel.style.setProperty("--board-px", px + "px");
+  requestAnimationFrame(syncSidebarToBoard);
   return px;
+}
+
+function syncSidebarToBoard() {
+  const sidebar = document.getElementById("analyze-sidebar");
+  const boardRow = document.querySelector(".board-row");
+  if (!sidebar || !boardPanel || !boardRow) return;
+  if (
+    document.body.classList.contains("game-view") ||
+    document.body.classList.contains("repertoire-open") ||
+    window.matchMedia("(max-width: 1000px)").matches
+  ) {
+    sidebar.style.removeProperty("--sidebar-align-pad");
+    return;
+  }
+  const pad = Math.max(
+    0,
+    Math.round(boardRow.getBoundingClientRect().top - boardPanel.getBoundingClientRect().top)
+  );
+  sidebar.style.setProperty("--sidebar-align-pad", pad + "px");
 }
 
 function initBoardResize() {
@@ -2422,6 +2494,15 @@ function initBoardResize() {
   });
 }
 initBoardResize();
+window.addEventListener("resize", () => requestAnimationFrame(syncSidebarToBoard));
+if (typeof ResizeObserver !== "undefined" && boardPanel) {
+  const boardAlignRo = new ResizeObserver(() => requestAnimationFrame(syncSidebarToBoard));
+  boardAlignRo.observe(boardPanel);
+  const titleElAlign = document.getElementById("line-title");
+  const playerTopAlign = document.getElementById("player-top");
+  if (titleElAlign) boardAlignRo.observe(titleElAlign);
+  if (playerTopAlign) boardAlignRo.observe(playerTopAlign);
+}
 
 const SIDEBAR_PX_LS = "sidebarPx";
 const SIDEBAR_PX_MIN = 280;
@@ -2753,14 +2834,18 @@ function setOpeningSort(mode) {
 function renderSidebar() {
   openingsEl.innerHTML = "";
   if (!state.report) {
-    openingsEl.innerHTML = '<div class="empty-note">Enter your chess.com username and hit Analyze to see the openings you actually play.</div>';
+    openingsEl.innerHTML =
+      '<div class="empty-note"><strong>Ready to analyze</strong>' +
+      '<p>Enter a chess.com username above and click <kbd>Analyze</kbd> to see the openings you actually play.</p></div>';
     summaryEl.textContent = "";
     if (openingSortEl) openingSortEl.hidden = true;
     return;
   }
   const rep = state.report[state.color];
   if (!rep) {
-    openingsEl.innerHTML = '<div class="empty-note">No data for this color.</div>';
+    openingsEl.innerHTML =
+      '<div class="empty-note"><strong>No games for this color</strong>' +
+      '<p>Try switching As White / As Black, or widen the date range.</p></div>';
     summaryEl.textContent = "";
     if (openingSortEl) openingSortEl.hidden = true;
     return;
@@ -2776,7 +2861,9 @@ function renderSidebar() {
   });
 
   if (!openings.length) {
-    openingsEl.innerHTML = '<div class="empty-note">No games match the selected time controls.</div>';
+    openingsEl.innerHTML =
+      '<div class="empty-note"><strong>No matching games</strong>' +
+      '<p>Turn on Rapid, Blitz, or Bullet — or pick a wider date range.</p></div>';
     if (openingSortEl) openingSortEl.hidden = true;
     return;
   }
@@ -3038,8 +3125,12 @@ function appendGamesSection(lines, op) {
 function setColor(color) {
   state.color = color;
   state.orientation = color;  // match board perspective to the side you're studying
-  document.getElementById("tab-white").classList.toggle("active", color === "white");
-  document.getElementById("tab-black").classList.toggle("active", color === "black");
+  const tabW = document.getElementById("tab-white");
+  const tabB = document.getElementById("tab-black");
+  tabW.classList.toggle("active", color === "white");
+  tabB.classList.toggle("active", color === "black");
+  tabW.setAttribute("aria-selected", color === "white" ? "true" : "false");
+  tabB.setAttribute("aria-selected", color === "black" ? "true" : "false");
   if (state.gameView) closeGameView();
   renderSidebar();
   resetGame();
@@ -3338,6 +3429,7 @@ function prettyDate(iso) {
 
 function setRangePanelOpen(open) {
   rangeWrap.classList.toggle("open", open);
+  if (rangeBtn) rangeBtn.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function markSelectedPreset(preset) {
@@ -4548,6 +4640,7 @@ async function openRepertoire() {
   setBoardTitle("My Repertoire");
   await ensureRepTree();
   renderPracticeList();
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 function closeRepertoire() {
@@ -4556,6 +4649,7 @@ function closeRepertoire() {
   state.repertoireOpen = false;
   document.body.classList.remove("repertoire-open");
   document.getElementById("my-repertoire-btn").classList.remove("active");
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 document.getElementById("my-repertoire-btn").onclick = () => {
@@ -4633,6 +4727,7 @@ loadRepertoireFromLocal();
 rebuildDerived();
 refreshBoard();
 updateEditTurnBtns();
+requestAnimationFrame(syncSidebarToBoard);
 </script>
 </body>
 </html>
