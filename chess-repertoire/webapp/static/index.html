@@ -6,7 +6,7 @@
 <title>Chess Repertoire Explorer</title>
 <link rel="icon" href="data:,">
 <style>
-  :root, html[data-board-theme="green"] {
+  :root, html[data-board-theme="blue"] {
     /* Surfaces */
     --bg-page: #312e2b;
     --bg-card: #262421;
@@ -15,20 +15,21 @@
     --border-subtle: rgba(255, 255, 255, 0.08);
 
     /* Brand / accent (name kept as --green for existing CSS) */
-    --green: #81b64c;
-    --green-hover: #8fc25b;
-    --green-shadow: #45753c;
-    --green-soft: rgba(129, 182, 76, 0.18);
-    --green-soft-2: rgba(129, 182, 76, 0.14);
-    --green-soft-3: rgba(129, 182, 76, 0.35);
-    --green-soft-4: rgba(129, 182, 76, 0.45);
+    --green: #4d8fd9;
+    --green-hover: #63a0e3;
+    --green-shadow: #2a5f9a;
+    --green-soft: rgba(77, 143, 217, 0.2);
+    --green-soft-2: rgba(77, 143, 217, 0.14);
+    --green-soft-3: rgba(77, 143, 217, 0.4);
+    --green-soft-4: rgba(77, 143, 217, 0.5);
 
     /* Board */
-    --board-light: #ebecd0;
-    --board-dark: #779556;
+    --board-light: #dee3ef;
+    --board-dark: #4b7399;
 
     /* Semantic */
     --loss-red: #fa412d;
+    --score-win: #81b64c; /* fixed W/L bar green — not tied to board theme */
     --draw-gray: #8b8987;
     --warn-orange: #e58f2a;
 
@@ -42,17 +43,22 @@
     --radius-sm: 6px;
 
     --hl: rgba(255, 255, 51, 0.5);   /* last-move highlight, chess.com yellow */
+    --hl-blunder: rgba(250, 65, 45, 0.55);
+    --hl-mistake: rgba(230, 159, 0, 0.55);
+    --hl-great: rgba(86, 180, 233, 0.55);
+    --hl-brilliant: rgba(143, 211, 255, 0.6); /* light blue */
+    --hl-best: rgba(129, 182, 76, 0.5);
   }
-  html[data-board-theme="blue"] {
-    --green: #4d8fd9;
-    --green-hover: #63a0e3;
-    --green-shadow: #2a5f9a;
-    --green-soft: rgba(77, 143, 217, 0.2);
-    --green-soft-2: rgba(77, 143, 217, 0.14);
-    --green-soft-3: rgba(77, 143, 217, 0.4);
-    --green-soft-4: rgba(77, 143, 217, 0.5);
-    --board-light: #dee3ef;
-    --board-dark: #4b7399;
+  html[data-board-theme="green"] {
+    --green: #81b64c;
+    --green-hover: #8fc25b;
+    --green-shadow: #45753c;
+    --green-soft: rgba(129, 182, 76, 0.18);
+    --green-soft-2: rgba(129, 182, 76, 0.14);
+    --green-soft-3: rgba(129, 182, 76, 0.35);
+    --green-soft-4: rgba(129, 182, 76, 0.45);
+    --board-light: #ebecd0;
+    --board-dark: #779556;
   }
   html[data-board-theme="pink"] {
     --green: #d46a9a;
@@ -149,8 +155,11 @@
     display: flex; flex-direction: column; align-items: center; gap: 12px;
   }
   #line-title {
+    /* Match board-row width; pad left so text centers on the board (not the eval bar). */
+    width: calc(var(--board-px) + 30px);
+    box-sizing: border-box;
+    padding: 10px 0 6px 30px;
     font-weight: 700; text-align: center; min-height: 22px;
-    max-width: calc(var(--board-px) + 30px);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: var(--text-primary);
   }
@@ -183,6 +192,13 @@
   }
   .player-strip.idle .player-avatar { display: none; }
   .player-strip.idle .player-id { display: none; }
+  .player-strip.idle .material-tray { display: none; }
+  .player-strip.idle {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+  }
+  #player-bot.idle { margin-bottom: -4px; }
   .player-avatar {
     flex: none; width: 40px; height: 40px; border-radius: 4px;
     background: #4a4a4a
@@ -209,10 +225,12 @@
   .player-strip .material-tray .caps img {
     width: 22px; height: 22px; margin-left: -6px;
   }
-  body.game-view .player-strip { min-height: 44px; }
-  body.game-view .player-avatar { width: 44px; height: 44px; }
+  body.game-view .player-strip { min-height: 40px; padding-bottom: 2px; }
+  body.game-view .player-avatar { width: 40px; height: 40px; }
   body.game-view .player-name { font-size: 16px; }
   body.game-view .player-rating { font-size: 15px; color: #b0b0b0; }
+  body.game-view .board-panel { gap: 8px; }
+  body.game-view #player-bot { margin-bottom: -2px; }
   .piece-bank {
     display: none; flex-direction: column; gap: 6px;
     width: calc(var(--board-px) + 30px);
@@ -242,6 +260,7 @@
   .edit-tools {
     display: none; align-items: center; justify-content: center; gap: 8px;
     width: calc(var(--board-px) + 30px); flex-wrap: wrap;
+    box-sizing: border-box; padding-left: 30px;
   }
   .edit-tools button {
     background: var(--bg-card); color: var(--text-secondary);
@@ -301,6 +320,11 @@
   .sq.light { background: var(--board-light); }
   .sq.dark { background: var(--board-dark); }
   .sq.hl::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
+  .sq.hl-blunder::after { background: var(--hl-blunder); }
+  .sq.hl-mistake::after { background: var(--hl-mistake); }
+  .sq.hl-great::after { background: var(--hl-great); }
+  .sq.hl-brilliant::after { background: var(--hl-brilliant); }
+  .sq.hl-best::after { background: var(--hl-best); }
   .sq.sel::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
   .sq.dest::before {
     content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%;
@@ -338,15 +362,48 @@
   .coord.file { right: 4px; bottom: 2px; }
   .coord.rank { left: 4px; top: 2px; }
 
-  .nav { display: flex; gap: 8px; align-items: center; }
+  .nav {
+    display: flex; gap: 6px; align-items: center; justify-content: center;
+    width: calc(var(--board-px) + 30px);
+    box-sizing: border-box;
+    padding-left: 30px; /* align with board squares, same as #line-title */
+    margin-top: 0;
+  }
   .nav button {
+    appearance: none; -webkit-appearance: none;
+    flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 36px;
+    padding: 0;
     background: var(--bg-card); color: var(--text-primary);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm); padding: 6px 16px; font-size: 15px; cursor: pointer;
+    border-radius: 8px;
+    font-size: 16px; line-height: 1; cursor: pointer;
   }
-  .nav button:hover { background: var(--bg-card-hover); border-color: var(--green); }
+  .nav button:hover { background: var(--bg-card-hover); border-color: var(--green); color: #fff; }
   .nav button.active { background: var(--green); color: #fff; border-color: var(--green); }
   .nav button.active:hover { background: var(--green-hover); }
+  /* Group move controls | board tools */
+  .nav #nav-reset { margin-left: 10px; }
+  body.game-view .nav {
+    margin-top: -2px;
+    gap: 8px;
+  }
+  body.game-view .nav button {
+    width: 44px; height: 40px;
+    font-size: 17px;
+    border-radius: 10px;
+    background: #2c2a27;
+    border-color: rgba(255,255,255,.08);
+  }
+  body.game-view .nav button:hover {
+    background: #3a3733;
+    border-color: var(--green);
+  }
+  body.game-view .nav #nav-reset { margin-left: 14px; }
+  body.game-view #engine-panel {
+    margin-top: 2px;
+  }
   #best-arrow {
     position: absolute; inset: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 3;
@@ -397,23 +454,27 @@
   body.game-view #openings { display: none !important; }
   body.game-view #game-panel { display: flex; }
   body.game-view #analyze-sidebar {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     background: #262421;
     border-radius: 0;
     margin: -8px -4px -8px 0;
     padding: 8px 0 0;
     --sidebar-align-pad: 0px;
+    /* Height synced to board column via JS — moves scroll inside, not the page */
+    overflow: hidden;
+    align-self: start;
   }
   body.game-view #analyze-sidebar .color-tabs {
     margin: 0 12px; gap: 8px;
   }
-  body.game-view #close-game-btn { width: calc(100% - 24px); margin: 0 12px; }
+  body.game-view #close-game-btn { width: calc(100% - 24px); margin: 0 12px; flex: none; }
   #game-panel {
     display: none; flex-direction: column; gap: 0;
-    flex: 1; min-height: 0;
+    flex: 1 1 auto; min-height: 0;
     background: #262421; border: 0; border-radius: 0;
     overflow: hidden;
-    max-height: none; height: calc(100vh - 200px);
   }
   #game-opening-title {
     padding: 10px 16px 8px; font-size: 13px; font-weight: 500;
@@ -421,55 +482,114 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #game-moves {
-    flex: 1; overflow-y: auto; overflow-x: hidden;
-    padding: 0 8px 8px;
-    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px; line-height: 1.2;
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px; line-height: 1;
     background: #262421;
+    color: #c3c2c1;
   }
-  #game-moves::-webkit-scrollbar { width: 10px; }
-  #game-moves::-webkit-scrollbar-track { background: #262421; }
-  #game-moves::-webkit-scrollbar-thumb { background: #3d3a37; border-radius: 5px; }
+  #game-moves::-webkit-scrollbar { width: 6px; }
+  #game-moves::-webkit-scrollbar-track { background: transparent; }
+  #game-moves::-webkit-scrollbar-thumb { background: #3d3a37; border-radius: 3px; }
+  #game-opening-title,
+  #game-analyze-status,
+  .game-panel-nav { flex: none; }
+  /* Chess.com Moves panel: zebra rows, number | white | black */
   .gm-row {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
-    align-items: center;
-    min-height: 32px;
-    column-gap: 2px;
+    grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    min-height: 40px;
+    column-gap: 0;
+    padding: 0 4px 0 0;
   }
+  .gm-row:nth-child(odd) { background: #262421; }
+  .gm-row:nth-child(even) { background: #21201d; }
   .gm-num {
-    color: #787774; font-size: 12px; font-weight: 600;
-    display: flex; align-items: center; justify-content: flex-end;
-    padding-right: 6px; user-select: none;
+    color: #787774;
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: flex-start;
+    padding: 0 0 0 12px;
+    user-select: none;
   }
   .gm-mv {
     appearance: none; -webkit-appearance: none;
-    display: inline-flex; align-items: center; gap: 2px;
-    margin: 1px 0; padding: 4px 8px 4px 6px;
-    min-height: 28px; min-width: 0; width: 100%;
-    background: transparent; border: 0; border-radius: 3px;
-    color: #ffffff; font: inherit; text-align: left;
+    display: inline-flex; align-items: center;
+    gap: 0;
+    margin: 4px 2px;
+    padding: 0 6px 0 2px;
+    min-height: 32px; min-width: 0; width: calc(100% - 4px);
+    background: transparent; border: 0; border-radius: 4px;
+    color: #c3c2c1; font: inherit; text-align: left;
     cursor: pointer; box-sizing: border-box;
   }
-  .gm-mv:hover { background: rgba(255,255,255,.06); }
+  .gm-mv:hover { background: rgba(255,255,255,.05); }
   .gm-mv:focus { outline: none; }
   .gm-mv.cur {
-    background: #3d3a37; color: #fff;
+    background: #3d3a37;
+    color: #fff;
   }
   .gm-mv.cur:hover { background: #454239; }
-  .gm-mv.bad-blunder { box-shadow: inset 3px 0 0 #e69f00; }
-  .gm-mv.bad-mistake { box-shadow: inset 3px 0 0 #f1c40f; }
-  .gm-mv.bad-inaccuracy { box-shadow: inset 3px 0 0 #56b4e9; }
+  /* Annotation colors tint SAN + figurine filter via currentColor */
+  .gm-mv.ann-blunder { color: #fa412d; }
+  .gm-mv.ann-mistake { color: #e69f00; }
+  .gm-mv.ann-great { color: #56b4e9; }
+  .gm-mv.ann-best,
+  .gm-mv.ann-brilliant { color: #81b64c; }
+  .gm-mv.cur.ann-blunder { color: #fa412d; }
+  .gm-mv.cur.ann-mistake { color: #e69f00; }
+  .gm-mv.cur.ann-great { color: #56b4e9; }
+  .gm-mv.cur.ann-best,
+  .gm-mv.cur.ann-brilliant { color: #81b64c; }
+  /* Fixed badge slot so piece icons line up across annotated / plain moves */
+  .gm-ann-slot {
+    flex: none;
+    width: 16px; height: 16px;
+    margin-right: 3px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .gm-ann {
+    flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    font-size: 8px; font-weight: 800; line-height: 1;
+    color: #fff;
+    letter-spacing: -0.06em;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .gm-ann.ann-blunder { background: #fa412d; font-size: 7px; letter-spacing: -0.08em; }
+  .gm-ann.ann-mistake { background: #e69f00; }
+  .gm-ann.ann-great { background: #56b4e9; font-size: 10px; font-weight: 700; }
+  .gm-ann.ann-best,
+  .gm-ann.ann-brilliant {
+    background: #81b64c;
+    font-size: 10px; font-weight: 700; letter-spacing: 0;
+  }
   .gm-mv img {
-    width: 18px; height: 18px; flex: none;
+    width: 20px; height: 20px; flex: none;
+    margin-right: 1px;
     object-fit: contain;
-    filter: drop-shadow(0 0 0.5px rgba(0,0,0,.8));
+    filter: drop-shadow(0 0 0.4px rgba(0,0,0,.75));
   }
   .gm-mv .san-rest {
-    font-size: 13px; font-weight: 600; color: inherit;
+    font-size: 14px; font-weight: 600; color: inherit;
     letter-spacing: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .gm-result {
+    padding: 10px 12px 14px;
+    font-size: 14px; font-weight: 600;
+    color: #a7a6a2;
+    user-select: none;
+  }
+  #game-analyze-status {
+    display: none; padding: 6px 14px 0; font-size: 12px;
+    color: #787774; font-weight: 600;
+  }
+  #game-analyze-status.visible { display: block; }
   .game-panel-nav {
     display: flex; gap: 8px; padding: 10px 12px 12px;
     border-top: 1px solid rgba(255,255,255,.06); background: #262421;
@@ -632,7 +752,7 @@
     width: 64px; height: 8px; border-radius: 4px; background: var(--loss-red);
     overflow: hidden; flex: none;
   }
-  .scorebar i { display: block; height: 100%; background: var(--green); }
+  .scorebar i { display: block; height: 100%; background: var(--score-win); }
   .chev { color: var(--text-muted); flex: none; transition: transform .15s; }
   .opening.open .chev { transform: rotate(90deg); }
   .lines { display: none; border-top: 1px solid var(--border-subtle); }
@@ -787,6 +907,43 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   }
   .modal h2 { margin: 0 0 2px; font-size: 18px; }
+  #upgrade-modal .modal { width: min(92vw, 420px); }
+  #upgrade-modal .upgrade-prices {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #upgrade-modal .upgrade-prices button {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    text-align: left; width: 100%;
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 12px 14px; cursor: pointer; font: inherit;
+  }
+  #upgrade-modal .upgrade-prices button:hover { border-color: var(--green); }
+  #upgrade-modal .upgrade-prices button .price {
+    font-size: 16px; font-weight: 800;
+  }
+  #upgrade-modal .upgrade-prices button .hint {
+    font-size: 12px; color: var(--text-muted); font-weight: 500;
+  }
+  #upgrade-modal .upgrade-prices button.featured {
+    border-color: var(--green); background: var(--green-soft);
+  }
+  .pro-chip {
+    display: inline-block; margin-left: 8px;
+    font-size: 10px; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; vertical-align: middle;
+    color: var(--green); border: 1px solid var(--green-soft-4);
+    border-radius: 4px; padding: 2px 6px;
+  }
+  .plan-badge {
+    display: inline-block; font-size: 12px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border-subtle); color: var(--text-muted);
+  }
+  .plan-badge.pro {
+    color: var(--green); border-color: var(--green-soft-4);
+  }
   .modal label {
     display: flex; flex-direction: column; gap: 4px;
     font-size: 13px; color: var(--text-secondary);
@@ -1018,12 +1175,21 @@
     padding: 6px 10px; font-size: 13px;
   }
   #rep-randomize-btn {
-    background: var(--bg-input); color: var(--text-primary);
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    background: var(--green); color: #fff;
+    border: 1px solid var(--green); border-radius: var(--radius-sm);
     padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 3px 0 var(--green-shadow);
   }
-  #rep-randomize-btn:hover { border-color: var(--green); color: var(--green); }
-  #rep-randomize-btn:disabled { opacity: .55; cursor: not-allowed; }
+  #rep-randomize-btn:hover { background: var(--green-hover); }
+  #rep-randomize-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--green-shadow); }
+  #rep-randomize-btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+  #practice-color-modal .practice-color-title {
+    margin: 0;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
   .color-choice-row {
     display: flex; flex-direction: column; gap: 8px;
   }
@@ -1039,6 +1205,114 @@
   .color-choice-row button .hint {
     display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 2px;
   }
+  #rep-slipups {
+    margin: 16px 0 0;
+    padding: 12px 12px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+  }
+  #rep-slipups h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  #rep-slipups-status {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 2px 0 4px;
+  }
+  #rep-slipups-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rep-slipup-item {
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+  .rep-slipup-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+  .rep-slipup-row:hover { background: var(--bg-card-hover); }
+  .rep-slipup-row .nm {
+    flex: 1;
+    min-width: 120px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .rep-slipup-row .meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .rep-slipup-row .qbadge { flex: none; }
+  .rep-slipup-row .chev {
+    color: var(--text-muted); flex: none; transition: transform .15s;
+    font-size: 12px;
+  }
+  .rep-slipup-item.open .rep-slipup-row .chev { transform: rotate(90deg); }
+  .rep-slipup-row button.primary {
+    background: var(--green); color: #fff; border: 1px solid var(--green);
+    border-radius: var(--radius-sm); padding: 5px 10px;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 3px 0 var(--green-shadow);
+  }
+  .rep-slipup-row button.primary:hover { background: var(--green-hover); }
+  .rep-slipup-games {
+    display: none;
+    border-top: 1px solid var(--border-subtle);
+    padding: 4px 0;
+  }
+  .rep-slipup-item.open .rep-slipup-games { display: block; }
+  .rep-slipup-game {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 7px 10px 7px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+  .rep-slipup-game:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+  .rep-slipup-game .qbadge { flex: none; transform: scale(0.9); }
+  .rep-slipup-game .opp {
+    flex: 1; min-width: 90px; font-weight: 600; color: var(--text-primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .rep-slipup-game .ratings {
+    color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .rep-slipup-game .date {
+    color: var(--text-muted); white-space: nowrap; min-width: 5.5em; text-align: right;
+  }
+  .rep-slipup-game .open-link {
+    flex: none; color: var(--green); font-weight: 700; white-space: nowrap;
+    text-decoration: none;
+  }
+  .rep-slipup-game:hover .open-link { text-decoration: underline; }
+  .rep-practice-list-label {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
   .rep-practice-list { display: flex; flex-direction: column; gap: 6px; }
   .rep-practice-row {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1047,6 +1321,16 @@
   }
   .rep-practice-row .nm { flex: 1; min-width: 140px; font-size: 13px; font-weight: 600; }
   .rep-practice-row .eco { color: var(--text-muted); font-size: 11px; font-weight: 700; }
+  .rep-practice-row .slip-badge {
+    flex: none;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #1a1a1a;
+  }
+  .rep-practice-row .slip-badge.blunder { background: #e69f00; }
+  .rep-practice-row .slip-badge.mistake { background: #f1c40f; }
   .rep-practice-row button {
     background: var(--bg-card); color: var(--text-primary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
@@ -1086,6 +1370,29 @@
     </div>
   </div>
 </header>
+
+<div class="modal-overlay" id="upgrade-modal" role="dialog" aria-labelledby="upgrade-title" aria-modal="true">
+  <div class="modal">
+    <h2 id="upgrade-title">Unlock Pro</h2>
+    <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
+      Game Review, Recent Slip-ups, and Practice vs Stockfish.
+    </p>
+    <div class="upgrade-prices">
+      <button type="button" id="upgrade-month-btn" data-interval="month">
+        <span class="price">$6 / month</span>
+        <span class="hint">Cancel anytime</span>
+      </button>
+      <button type="button" id="upgrade-year-btn" class="featured" data-interval="year">
+        <span class="price">$40 / year</span>
+        <span class="hint">Save ~$32 vs monthly</span>
+      </button>
+    </div>
+    <div class="form-msg" id="upgrade-msg"></div>
+    <div class="modal-actions">
+      <button class="ghost" type="button" id="upgrade-cancel-btn">Not now</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="auth-modal">
   <div class="modal">
@@ -1137,6 +1444,11 @@
       <input id="profile-email" type="email" disabled>
     </label>
     <div class="profile-row" id="profile-link-status"></div>
+    <div class="profile-row" style="margin-top:10px;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="plan-badge" id="profile-plan-badge">Free</span>
+      <button class="primary" type="button" id="profile-upgrade-btn" style="display:none">Upgrade to Pro</button>
+      <button class="ghost" type="button" id="profile-billing-btn" style="display:none">Manage billing</button>
+    </div>
   </div>
 
   <div class="profile-card">
@@ -1157,15 +1469,15 @@
 
   <div class="profile-card" id="profile-theme-card">
     <h2>Board color</h2>
-    <p class="hint">Changes the dark squares and the accent color across the app. Green is the default.</p>
+    <p class="hint">Changes the dark squares and the accent color across the app. Blue is the default.</p>
     <div class="theme-swatches" id="theme-swatches" role="radiogroup" aria-label="Board color">
-      <button type="button" class="theme-swatch active" data-theme="green" aria-pressed="true">
-        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        Green
-      </button>
-      <button type="button" class="theme-swatch" data-theme="blue" aria-pressed="false">
+      <button type="button" class="theme-swatch active" data-theme="blue" aria-pressed="true">
         <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         Blue
+      </button>
+      <button type="button" class="theme-swatch" data-theme="green" aria-pressed="false">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Green
       </button>
       <button type="button" class="theme-swatch" data-theme="pink" aria-pressed="false">
         <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -1202,10 +1514,7 @@
 
 <div class="modal-overlay" id="practice-color-modal" role="dialog" aria-labelledby="practice-color-title" aria-modal="true">
   <div class="modal">
-    <h2 id="practice-color-title">Play as…</h2>
-    <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
-      Pick a side, then a random opening from your repertoire will start.
-    </p>
+    <h2 id="practice-color-title" class="practice-color-title">PLAY AS</h2>
     <div class="color-choice-row">
       <button type="button" data-color="white">
         White
@@ -1302,11 +1611,10 @@
           <span class="range-chev">&#9660;</span>
         </button>
         <div id="range-panel" role="listbox" aria-label="Date range presets">
+          <button class="preset" type="button" data-preset="7d"><span class="tick">&#10003;</span>Last 7 days</button>
           <button class="preset selected" type="button" data-preset="30d"><span class="tick">&#10003;</span>Last 30 days</button>
-          <button class="preset" type="button" data-preset="3m"><span class="tick">&#10003;</span>Last 3 months</button>
           <button class="preset" type="button" data-preset="6m"><span class="tick">&#10003;</span>Last 6 months</button>
           <button class="preset" type="button" data-preset="12m"><span class="tick">&#10003;</span>Last 12 months</button>
-          <button class="preset" type="button" data-preset="ytd"><span class="tick">&#10003;</span>This year</button>
           <button class="preset" type="button" data-preset="all"><span class="tick">&#10003;</span>All time</button>
           <div class="range-custom">
             <div class="rc-title">Custom range</div>
@@ -1336,6 +1644,7 @@
     </div>
     <div id="game-panel" aria-label="Game moves">
       <div id="game-opening-title"></div>
+      <div id="game-analyze-status" aria-live="polite"></div>
       <div id="game-moves"></div>
       <div class="game-panel-nav">
         <button type="button" id="game-nav-start" title="Start">|&#8249;</button>
@@ -1363,7 +1672,7 @@
   </aside>
 
   <section id="repertoire-practice" aria-label="Practice repertoire">
-    <h3>Practice vs Stockfish</h3>
+    <h3>Practice vs Stockfish <span class="pro-chip" id="practice-pro-chip" hidden>Pro</span></h3>
     <div class="rep-practice-toolbar">
       <label>Difficulty
         <select id="rep-difficulty" title="Opponent Elo">
@@ -1378,13 +1687,19 @@
           <option value="3000">3000 Elo</option>
         </select>
       </label>
-      <button type="button" id="rep-randomize-btn" title="Practice a random line from your repertoire">
-        Randomize
+      <button type="button" id="rep-randomize-btn" title="Practice a random opening from your repertoire">
+        Practice All
       </button>
       <span id="rep-practice-status" class="rep-empty"></span>
     </div>
+    <div class="rep-practice-list-label">Your openings</div>
     <div class="rep-practice-list" id="rep-practice-list">
       <div class="rep-empty">No openings saved yet. Add some from the tree on the right.</div>
+    </div>
+    <div id="rep-slipups" aria-live="polite">
+      <h4>Recent slip-ups <span class="pro-chip" id="slipups-pro-chip" hidden>Pro</span></h4>
+      <div id="rep-slipups-status">Analyze your games first to see early-opening slip-ups (moves 1–6) here.</div>
+      <div id="rep-slipups-list"></div>
     </div>
   </section>
 </main>
@@ -1404,7 +1719,9 @@ const state = {
   sans: [],                 // SAN of every move in the current game
   fens: [START_FEN],        // fens[i] = position after i plies
   moves: [],                // verbose chess.js move objects
-  moveFlags: [],            // opening blunder/mistake flags for current game
+  moveFlags: [],            // game-review flags for the original main line
+  mainLineSans: [],         // original game SAN; explore moves diverge from this
+  exploreAnns: {},          // ply -> annotation for off-main-line explorations
   lastOpeningName: null,    // deepest opening name recognized for current line
   editMode: false,         // free-place position editor
   boardPlayers: null,      // { white:{name,rating}, black:{name,rating} } when a game is loaded
@@ -1450,7 +1767,11 @@ function truncateToPly() {
 
 function makeUserMove(from, to, promotion) {
   if (state.editMode || freeFen) return false;
-  if (state.ply < state.sans.length) truncateToPly();
+  if (state.ply < state.sans.length) {
+    truncateToPly();
+    clearExploreAnnsFrom(state.ply + 1);
+  }
+  const fenBefore = currentFen();
   try {
     game.move({ from, to, promotion });
   } catch (e) {
@@ -1458,7 +1779,11 @@ function makeUserMove(from, to, promotion) {
   }
   rebuildDerived();
   state.ply = state.sans.length;
+  clearExploreAnnsFrom(state.ply);
   refreshBoard();
+  if (!isMainLinePly(state.ply)) {
+    scheduleExploreAnnotate(state.ply, fenBefore, state.sans[state.ply - 1]);
+  }
   if (state.practiceMode) schedulePracticeReply();
   return true;
 }
@@ -1493,6 +1818,7 @@ function undoLastAction() {
   if (state.ply <= 0) return false;
   state.ply -= 1;
   truncateToPly();
+  clearExploreAnnsFrom(state.ply + 1);
   refreshBoard();
   return true;
 }
@@ -1621,7 +1947,75 @@ function updateEditTurnBtns() {
 
 const boardEl = document.getElementById("board");
 
-function renderBoard(fen, orientation, hlSquares) {
+const ANN_GLYPH = {
+  blunder: "??",
+  mistake: "?",
+  great: "!",
+  best: "★",
+  brilliant: "★",
+};
+
+function clearExploreAnnsFrom(ply) {
+  if (!state.exploreAnns) state.exploreAnns = {};
+  for (const k of Object.keys(state.exploreAnns)) {
+    if (+k >= ply) delete state.exploreAnns[k];
+  }
+}
+
+/** True if sans[0..ply-1] still match the original reviewed game. */
+function isMainLinePly(ply) {
+  if (!ply || !state.mainLineSans?.length) return !state.mainLineSans?.length;
+  if (ply > state.mainLineSans.length) return false;
+  for (let i = 0; i < ply; i++) {
+    if (state.sans[i] !== state.mainLineSans[i]) return false;
+  }
+  return true;
+}
+
+function annotationAtPly(ply) {
+  if (!ply) return null;
+  // Off-main-line: only use live explore classifications (never original game flags).
+  if (!isMainLinePly(ply)) {
+    const ex = state.exploreAnns?.[ply];
+    return ex && ANN_GLYPH[ex.severity] ? ex : null;
+  }
+  for (const f of (state.moveFlags || [])) {
+    if (f.ply === ply && ANN_GLYPH[f.severity]) return f;
+  }
+  return null;
+}
+
+let exploreAnnotateToken = 0;
+
+async function scheduleExploreAnnotate(ply, fenBefore, san) {
+  if (!ply || !fenBefore || !san) return;
+  const token = ++exploreAnnotateToken;
+  try {
+    const data = await api("/api/annotate-ply", "POST", {
+      fen: fenBefore,
+      san,
+      ply,
+    });
+    if (token !== exploreAnnotateToken) return;
+    if (state.ply !== ply && !isMainLinePly(ply)) {
+      // Still accept if this ply remains on the current line.
+      if (state.sans[ply - 1] !== san) return;
+    }
+    if (data.annotation && ANN_GLYPH[data.annotation.severity]) {
+      state.exploreAnns[ply] = data.annotation;
+    } else {
+      delete state.exploreAnns[ply];
+    }
+    if (state.ply === ply) refreshBoard();
+    else if (state.gameView) renderGameMoveList();
+  } catch (e) {
+    if (!handleProGateError(e)) {
+      /* explore annotate is best-effort */
+    }
+  }
+}
+
+function renderBoard(fen, orientation, hlSquares, hlSeverity) {
   const rows = fen.split(" ")[0].split("/");
   // grid[rank 8..1][file a..h]
   const grid = rows.map(row => {
@@ -1644,7 +2038,10 @@ function renderBoard(fen, orientation, hlSquares) {
       sq.className = "sq " + (light ? "light" : "dark");
       const sqName = "abcdefgh"[f] + (8 - r);
       sq.dataset.square = sqName;
-      if (hlSquares && hlSquares.has(sqName)) sq.classList.add("hl");
+      if (hlSquares && hlSquares.has(sqName)) {
+        sq.classList.add("hl");
+        if (hlSeverity && ANN_GLYPH[hlSeverity]) sq.classList.add("hl-" + hlSeverity);
+      }
       const pc = grid[r][f];
       if (pc) {
         const img = document.createElement("img");
@@ -1840,11 +2237,16 @@ function clearBoardPlayers() {
 
 function refreshBoard() {
   let hl = null;
+  let hlSeverity = null;
   if (state.ply > 0) {
     hl = diffSquares(state.fens[state.ply - 1], currentFen());
+    // Prefer exact from/to of the played move when available.
+    const mv = state.moves[state.ply - 1];
+    if (mv?.from && mv?.to) hl = new Set([mv.from, mv.to]);
+    hlSeverity = annotationAtPly(state.ply)?.severity || null;
   }
   clearSelection();
-  renderBoard(currentFen(), state.orientation, hl);
+  renderBoard(currentFen(), state.orientation, hl, hlSeverity);
   markMovablePieces();
   renderMoveList();
   renderMaterial();
@@ -2231,6 +2633,46 @@ const movesEl = document.getElementById("line-moves");
 const titleEl = document.getElementById("line-title");
 const gameMovesEl = document.getElementById("game-moves");
 const gameOpeningTitleEl = document.getElementById("game-opening-title");
+const gameAnalyzeStatusEl = document.getElementById("game-analyze-status");
+let gameAnnotateToken = 0;
+
+function setGameAnalyzeStatus(text) {
+  if (!gameAnalyzeStatusEl) return;
+  if (text) {
+    gameAnalyzeStatusEl.textContent = text;
+    gameAnalyzeStatusEl.classList.add("visible");
+  } else {
+    gameAnalyzeStatusEl.textContent = "";
+    gameAnalyzeStatusEl.classList.remove("visible");
+  }
+}
+
+async function requestGameAnnotations(sanList, token) {
+  if (!sanList?.length) return;
+  setGameAnalyzeStatus("Analyzing moves…");
+  try {
+    const data = await api("/api/annotate-game", "POST", { san: sanList });
+    if (token !== gameAnnotateToken) return; // stale — another game opened
+    const anns = Array.isArray(data.annotations) ? data.annotations : [];
+    state.moveFlags = anns;
+    if (state.activeGame) {
+      state.activeGame._flags = anns;
+      state.activeGame._annotated = true;
+    }
+    setGameAnalyzeStatus("");
+    if (state.gameView) {
+      renderGameMoveList();
+      refreshBoard();
+    }
+  } catch (e) {
+    if (token !== gameAnnotateToken) return;
+    if (handleProGateError(e)) {
+      setGameAnalyzeStatus("Pro required for full game review.");
+      return;
+    }
+    setGameAnalyzeStatus(e.message || "Analysis failed");
+  }
+}
 const closeGameBtn = document.getElementById("close-game-btn");
 
 const FIGURINE_PIECES = { K: "k", Q: "q", R: "r", B: "b", N: "n" };
@@ -2252,15 +2694,41 @@ function parseSanFigurine(san, isWhite) {
   return { piece: null, rest: s, color: isWhite ? "w" : "b" };
 }
 
+function annGlyph(severity) {
+  return ANN_GLYPH[severity] || "";
+}
+
+function gameResultLabel(g) {
+  if (!g?.result) return null;
+  if (g.result === "draw") return "1/2-1/2";
+  const whiteWon = (g.color === "white" && g.result === "win")
+    || (g.color === "black" && g.result === "loss");
+  return whiteWon ? "1-0" : "0-1";
+}
+
 function makeFigurineMoveEl(san, ply, flag) {
   const isWhite = ply % 2 === 1;
   const { piece, rest, color } = parseSanFigurine(san, isWhite);
   const el = document.createElement("button");
   el.type = "button";
   const isCur = state.ply === ply;
+  const sev = flag?.severity && ANN_GLYPH[flag.severity] ? flag.severity : null;
   el.className = "gm-mv" +
     (isCur ? " cur" : "") +
-    (flag ? " bad-" + flag.severity : "");
+    (sev ? " ann-" + sev : "");
+
+  // Fixed-width slot: badge immediately left of piece (chess.com spacing).
+  const slot = document.createElement("span");
+  slot.className = "gm-ann-slot";
+  slot.setAttribute("aria-hidden", "true");
+  if (sev) {
+    const badge = document.createElement("span");
+    badge.className = "gm-ann ann-" + sev;
+    badge.textContent = annGlyph(sev);
+    slot.appendChild(badge);
+  }
+  el.appendChild(slot);
+
   // Chess.com: figurines for N/B/R/Q/K only — pawns stay plain SAN (e4, exd5).
   if (piece && piece !== "p") {
     const img = document.createElement("img");
@@ -2273,9 +2741,14 @@ function makeFigurineMoveEl(san, ply, flag) {
   txt.className = "san-rest";
   txt.textContent = piece && FIGURINE_PIECES[san[0]] ? rest : san;
   el.appendChild(txt);
-  if (flag) {
-    el.title = `${flag.severity}: lost ${(flag.loss_cp / 100).toFixed(1)}` +
-      (flag.best_san ? ` (better: ${flag.best_san})` : "");
+  if (flag && sev) {
+    const label = sev.charAt(0).toUpperCase() + sev.slice(1);
+    if (sev === "blunder" || sev === "mistake") {
+      el.title = `${label}: lost ${(flag.loss_cp / 100).toFixed(1)}` +
+        (flag.best_san ? ` (better: ${flag.best_san})` : "");
+    } else {
+      el.title = label + (flag.best_san ? ` · engine: ${flag.best_san}` : "");
+    }
   }
   el.onclick = () => { state.ply = ply; refreshBoard(); };
   return el;
@@ -2297,10 +2770,13 @@ function setGameView(on, game) {
 }
 
 function closeGameView() {
+  gameAnnotateToken += 1; // cancel in-flight annotate
+  setGameAnalyzeStatus("");
   setGameView(false);
   clearBoardPlayers();
   // Keep current board position; user can keep analyzing or pick another opening.
   renderMoveList();
+  requestAnimationFrame(syncSidebarToBoard);
 }
 
 function renderGameMoveList() {
@@ -2336,10 +2812,20 @@ function renderGameMoveList() {
       const empty = document.createElement("div");
       empty.className = "gm-mv";
       empty.style.visibility = "hidden";
+      empty.setAttribute("aria-hidden", "true");
       row.appendChild(empty);
     }
     gameMovesEl.appendChild(row);
   }
+
+  const result = gameResultLabel(state.activeGame);
+  if (result) {
+    const res = document.createElement("div");
+    res.className = "gm-result";
+    res.textContent = result;
+    gameMovesEl.appendChild(res);
+  }
+
   if (curEl) {
     try { curEl.scrollIntoView({ block: "nearest" }); } catch (e) { /* ignore */ }
   }
@@ -2412,6 +2898,9 @@ function resetGame(title) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = null;
   clearBoardPlayers();
   setGameView(false);
@@ -2453,8 +2942,22 @@ function syncSidebarToBoard() {
   const sidebar = document.getElementById("analyze-sidebar");
   const boardRow = document.querySelector(".board-row");
   if (!sidebar || !boardPanel || !boardRow) return;
+
+  if (document.body.classList.contains("game-view")) {
+    sidebar.style.removeProperty("--sidebar-align-pad");
+    // Cap the moves panel to the board column height so long games scroll in-place.
+    const h = Math.round(boardPanel.getBoundingClientRect().height);
+    if (h > 0) {
+      sidebar.style.height = h + "px";
+      sidebar.style.maxHeight = h + "px";
+    }
+    return;
+  }
+
+  sidebar.style.removeProperty("height");
+  sidebar.style.removeProperty("max-height");
+
   if (
-    document.body.classList.contains("game-view") ||
     document.body.classList.contains("repertoire-open") ||
     window.matchMedia("(max-width: 1000px)").matches
   ) {
@@ -2624,6 +3127,9 @@ function loadLine(line, openingName) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = line.name || null;
   clearBoardPlayers();
   setGameView(false);
@@ -2645,13 +3151,19 @@ function loadGameReplay(g) {
   freeFen = null;
   gameRootFen = START_FEN;
   const gm = new Chess();
-  for (const san of g.san) {
-    try { gm.move(san); }
-    catch (e) { break; }
+  const sans = [];
+  for (const san of (g.san || [])) {
+    try {
+      gm.move(san);
+      sans.push(san);
+    } catch (e) { break; }
   }
   game = gm;
   rebuildDerived();
   state.ply = 0;
+  state.mainLineSans = sans.slice();
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.moveFlags = g._flags || [];
   state.lastOpeningName = g.variation || null;
   titleEl.textContent = g.variation || "Starting position";
@@ -2659,6 +3171,18 @@ function loadGameReplay(g) {
   setGameView(true, g);
   // Keep any variation filter/highlight: the user is browsing that list.
   animateLine(GAME_PREVIEW_PLIES);
+
+  // Full-game chess.com-style review (ignore stale if user opens another game).
+  const token = ++gameAnnotateToken;
+  if (g._annotated && Array.isArray(g._flags)) {
+    state.moveFlags = g._flags;
+    setGameAnalyzeStatus("");
+    renderGameMoveList();
+  } else if (sans.length) {
+    requestGameAnnotations(sans, token);
+  } else {
+    setGameAnalyzeStatus("");
+  }
 }
 
 /* ---------- sidebar ---------- */
@@ -3112,7 +3636,11 @@ function appendGamesSection(lines, op) {
       renderPatterns(pats);
       render(activeFilter);
     } catch (e) {
-      scanStatus.textContent = e.message || "Scan failed";
+      if (handleProGateError(e)) {
+        scanStatus.textContent = "Pro required to scan for opening mistakes.";
+      } else {
+        scanStatus.textContent = e.message || "Scan failed";
+      }
     } finally {
       scanBtn.disabled = false;
     }
@@ -3246,6 +3774,8 @@ function applyReport(data) {
   statusEl.textContent = msg;
   if (data.warnings && data.warnings.length) statusEl.className = "error";
   setColor(state.color);
+  repSlipupsScanKey = ""; // force rescan with new games
+  if (state.repertoireOpen) scheduleRepSlipupsRefresh();
 }
 
 async function runReportSync(syncPath, fetchingMsg) {
@@ -3402,11 +3932,10 @@ function isoLocal(d) {
 }
 
 const RANGE_PRESETS = {
+  "7d":  { label: "Last 7 days",    since: () => { const d = new Date(); d.setDate(d.getDate() - 7); return isoLocal(d); } },
   "30d": { label: "Last 30 days",   since: () => { const d = new Date(); d.setDate(d.getDate() - 30); return isoLocal(d); } },
-  "3m":  { label: "Last 3 months",  since: () => { const d = new Date(); d.setMonth(d.getMonth() - 3); return isoLocal(d); } },
   "6m":  { label: "Last 6 months",  since: () => { const d = new Date(); d.setMonth(d.getMonth() - 6); return isoLocal(d); } },
-  "12m": { label: "Last 12 months", since: () => null },     // backend default window
-  "ytd": { label: "This year",      since: () => `${new Date().getFullYear()}-01-01` },
+  "12m": { label: "Last 12 months", since: () => { const d = new Date(); d.setMonth(d.getMonth() - 12); return isoLocal(d); } },
   "all": { label: "All time",       since: () => "2005-01-01" },  // predates chess.com archives
 };
 
@@ -3535,6 +4064,22 @@ const userMenu = document.getElementById("user-menu");
 const profileMsg = document.getElementById("profile-msg");
 const profilePwMsg = document.getElementById("profile-pw-msg");
 
+function isProUser() {
+  // When billing isn't configured, server reports is_pro=true for everyone logged in
+  // and guests still hit 402 only if billing is on — treat missing user as free.
+  if (currentUser) return !!currentUser.is_pro;
+  return false;
+}
+
+function syncProChips() {
+  // Light Pro chip for Free users when Stripe billing is live.
+  const show = !!(currentUser?.billing_enabled && !currentUser.is_pro);
+  const practiceChip = document.getElementById("practice-pro-chip");
+  const slipChip = document.getElementById("slipups-pro-chip");
+  if (practiceChip) practiceChip.hidden = !show;
+  if (slipChip) slipChip.hidden = !show;
+}
+
 function setUser(user) {
   currentUser = user;
   const loggedIn = !!user;
@@ -3550,6 +4095,7 @@ function setUser(user) {
     closeProfile();
     loadRepertoireFromLocal();
   }
+  syncProChips();
 }
 
 function fillProfileForm(user) {
@@ -3564,6 +4110,18 @@ function fillProfileForm(user) {
     `<span class="profile-pill ${li ? "ok" : "miss"}">lichess: ${li || "not linked"}</span>`;
   const pwCard = document.getElementById("profile-password-card");
   if (pwCard) pwCard.style.display = user?.has_password ? "" : "none";
+
+  const badge = document.getElementById("profile-plan-badge");
+  const upBtn = document.getElementById("profile-upgrade-btn");
+  const billBtn = document.getElementById("profile-billing-btn");
+  const pro = !!user?.is_pro;
+  const billingOn = !!user?.billing_enabled;
+  if (badge) {
+    badge.textContent = pro ? "Pro" : "Free";
+    badge.classList.toggle("pro", pro);
+  }
+  if (upBtn) upBtn.style.display = billingOn && !pro ? "" : "none";
+  if (billBtn) billBtn.style.display = billingOn && pro ? "" : "none";
 }
 
 function openProfile() {
@@ -3591,8 +4149,112 @@ async function api(path, method, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await readJson(resp);
-  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const err = new Error(data.error || `HTTP ${resp.status}`);
+    err.status = resp.status;
+    err.code = data.code || null;
+    throw err;
+  }
   return data;
+}
+
+/* ---------- Pro / Stripe upgrade ---------- */
+
+const upgradeModal = document.getElementById("upgrade-modal");
+const upgradeMsg = document.getElementById("upgrade-msg");
+
+function openUpgradeModal() {
+  if (!currentUser) {
+    authModal.classList.add("open");
+    return;
+  }
+  setMsg(upgradeMsg, "");
+  upgradeModal?.classList.add("open");
+}
+
+function closeUpgradeModal() {
+  upgradeModal?.classList.remove("open");
+  setMsg(upgradeMsg, "");
+}
+
+/** If API error needs login/Pro, open the right modal. Returns true if handled. */
+function handleProGateError(e) {
+  if (e?.code === "login_required" || e?.status === 401) {
+    authModal.classList.add("open");
+    return true;
+  }
+  if (e?.code === "pro_required" || e?.status === 402) {
+    openUpgradeModal();
+    return true;
+  }
+  return false;
+}
+
+async function startCheckout(interval) {
+  if (!currentUser) {
+    authModal.classList.add("open");
+    return;
+  }
+  setMsg(upgradeMsg, "Redirecting to checkout\u2026");
+  try {
+    const data = await api("/api/billing/checkout", "POST", { interval });
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    setMsg(upgradeMsg, "No checkout URL returned.", "error");
+  } catch (e) {
+    setMsg(upgradeMsg, e.message || "Checkout failed", "error");
+  }
+}
+
+async function openBillingPortal() {
+  setMsg(profileMsg, "Opening billing portal\u2026");
+  try {
+    const data = await api("/api/billing/portal", "POST", {});
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    setMsg(profileMsg, "No portal URL returned.", "error");
+  } catch (e) {
+    setMsg(profileMsg, e.message || "Could not open portal", "error");
+  }
+}
+
+function initBillingUi() {
+  document.getElementById("upgrade-cancel-btn")?.addEventListener("click", closeUpgradeModal);
+  document.getElementById("upgrade-month-btn")?.addEventListener("click", () => startCheckout("month"));
+  document.getElementById("upgrade-year-btn")?.addEventListener("click", () => startCheckout("year"));
+  document.getElementById("profile-upgrade-btn")?.addEventListener("click", openUpgradeModal);
+  document.getElementById("profile-billing-btn")?.addEventListener("click", openBillingPortal);
+  upgradeModal?.addEventListener("click", e => {
+    if (e.target === upgradeModal) closeUpgradeModal();
+  });
+
+  // Return from Stripe Checkout
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (billing === "success") {
+      params.delete("billing");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+      refreshMeAfterBilling();
+    } else if (billing === "cancel") {
+      params.delete("billing");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshMeAfterBilling() {
+  try {
+    const user = await api("/api/me", "GET");
+    setUser(user);
+    closeUpgradeModal();
+  } catch (e) { /* ignore */ }
 }
 
 function setMsg(el, text, cls) {
@@ -4188,10 +4850,15 @@ async function loadRepertoireFromServer() {
   }
   renderPracticeList();
   if (repTreeBuilt) updateRepTreeButtons();
+  if (state.repertoireOpen) scheduleRepSlipupsRefresh();
 }
 
 async function persistRepertoire() {
   localStorage.setItem(REP_LS, JSON.stringify(state.myRepertoire));
+  if (state.repertoireOpen) {
+    repSlipupsScanKey = "";
+    scheduleRepSlipupsRefresh();
+  }
   if (!currentUser) return;
   try {
     await api("/api/me/repertoire", "PUT", state.myRepertoire);
@@ -4382,6 +5049,399 @@ function setRepColor(color) {
   document.getElementById("rep-tab-black").classList.toggle("active", state.repColor === "black");
   updateRepTreeButtons();
   renderPracticeList();
+  scheduleRepSlipupsRefresh();
+}
+
+/* ---------- repertoire slip-ups (opening issues in saved lines) ---------- */
+
+let repSlipupsByPlay = {}; // play -> { entry, worst, counts, issueGames, games[] }
+let repSlipupsScanKey = "";
+let repSlipupsBusy = false;
+let repSlipupsTimer = null;
+let repSlipupsExpandedPlay = "";
+
+const SLIP_SEV_RANK = { blunder: 3, mistake: 2 };
+/** First 6 full moves (12 plies) — early opening only, not middlegame slips. */
+const REP_SLIPUP_OPENING_PLIES = 12;
+
+function slipupsCacheKey() {
+  const plays = (state.myRepertoire[state.repColor] || [])
+    .map(e => e.play).filter(Boolean).sort().join("|");
+  const uname = state.report?.username || "";
+  const n = state.report?.analyzed_games || 0;
+  const since = state.report?.since || "";
+  const until = state.report?.until || "";
+  // v3 = early-opening window (first 6 moves) + mistakes/blunders only
+  return `v3:${REP_SLIPUP_OPENING_PLIES}:${state.repColor}:${uname}:${n}:${since}:${until}:${plays}`;
+}
+
+/** Keep only early-opening mistake/blunder flags and summarize them. */
+function slipFlagsFromScan(sg) {
+  const flags = (sg?.flags || []).filter(f =>
+    (f.severity === "blunder" || f.severity === "mistake")
+    && (f.ply || 0) <= REP_SLIPUP_OPENING_PLIES
+  );
+  const counts = { blunder: 0, mistake: 0 };
+  let worst = null;
+  for (const f of flags) {
+    counts[f.severity] = (counts[f.severity] || 0) + 1;
+    worst = worst ? worseSeverity(worst, f.severity) : f.severity;
+  }
+  return { flags, counts, worst };
+}
+
+function sanMatchesPlayPrefix(sanList, playUci) {
+  const playParts = String(playUci || "").split(",").filter(Boolean);
+  if (!playParts.length || !Array.isArray(sanList) || !sanList.length) return false;
+  if (sanList.length < playParts.length) return false;
+  try {
+    const c = new Chess();
+    for (let i = 0; i < playParts.length; i++) {
+      const m = c.move(sanList[i]);
+      if (!m) return false;
+      const u = m.from + m.to + (m.promotion || "");
+      if (u !== playParts[i]) return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function openingNameMatchesRep(opName, entryName) {
+  const a = String(opName || "").toLowerCase().trim();
+  const b = String(entryName || "").toLowerCase().trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.startsWith(b) || b.startsWith(a)) return true;
+  const af = a.split(":")[0].trim();
+  const bf = b.split(":")[0].trim();
+  return !!af && af === bf;
+}
+
+function collectGamesForRepEntry(entry) {
+  const rep = state.report?.[state.repColor];
+  if (!rep) return [];
+  const out = [];
+  const seen = new Set();
+  for (const op of (rep.openings || [])) {
+    const nameHit = openingNameMatchesRep(op.name, entry.name);
+    for (const g of (op.game_list || [])) {
+      if (g.color && g.color !== state.repColor) continue;
+      if (!g.san || !g.san.length) continue;
+      const playHit = sanMatchesPlayPrefix(g.san, entry.play);
+      const varHit = openingNameMatchesRep(g.variation, entry.name);
+      if (!nameHit && !playHit && !varHit) continue;
+      const key = g.url || `${g.date}|${g.opponent}|${(g.san || []).slice(0, 8).join(" ")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(g);
+    }
+  }
+  return out;
+}
+
+function formatSlipCounts(counts) {
+  if (!counts) return "";
+  const parts = [];
+  if (counts.blunder) parts.push(`${counts.blunder} blunder${counts.blunder === 1 ? "" : "s"}`);
+  if (counts.mistake) parts.push(`${counts.mistake} mistake${counts.mistake === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+function mergeCounts(a, b) {
+  return {
+    blunder: (a?.blunder || 0) + (b?.blunder || 0),
+    mistake: (a?.mistake || 0) + (b?.mistake || 0),
+  };
+}
+
+function worseSeverity(a, b) {
+  return (SLIP_SEV_RANK[a] || 0) >= (SLIP_SEV_RANK[b] || 0) ? a : b;
+}
+
+function setSlipupsStatus(text) {
+  const el = document.getElementById("rep-slipups-status");
+  if (el) el.textContent = text || "";
+}
+
+function loadSlipupGame(g) {
+  if (!g?.san?.length) return;
+  stopPractice();
+  closeRepertoire();
+  // Match analyze tab to the side you played so the board context is right.
+  if (g.color === "white" || g.color === "black") setColor(g.color);
+  loadGameReplay(g);
+}
+
+function makeSlipupGameRow(g) {
+  const row = document.createElement("div");
+  row.className = "rep-slipup-game";
+  row.title = "Open this game on the analysis board";
+
+  const badge = document.createElement("span");
+  badge.className = "qbadge " + (g._worst === "blunder" ? "blunder" : "mistake");
+  badge.textContent = g._worst === "blunder" ? "??" : "?";
+
+  const opp = document.createElement("span");
+  opp.className = "opp";
+  opp.textContent = g.opponent || "Opponent";
+
+  const ratings = document.createElement("span");
+  ratings.className = "ratings";
+  const meR = g.my_rating || "—";
+  const oppR = g.opponent_rating || "—";
+  ratings.textContent = `You ${meR} · Opp ${oppR}`;
+
+  const date = document.createElement("span");
+  date.className = "date";
+  date.textContent = g.date || "";
+
+  const link = document.createElement("span");
+  link.className = "open-link";
+  link.textContent = "Open";
+
+  row.append(badge, opp, ratings, date, link);
+  row.onclick = () => loadSlipupGame(g);
+  return row;
+}
+
+function renderRepSlipups() {
+  const listEl = document.getElementById("rep-slipups-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  const rows = Object.values(repSlipupsByPlay)
+    .filter(x => x.issueGames > 0)
+    .sort((a, b) => {
+      const dr = (SLIP_SEV_RANK[b.worst] || 0) - (SLIP_SEV_RANK[a.worst] || 0);
+      if (dr) return dr;
+      return b.issueGames - a.issueGames;
+    })
+    .slice(0, 5);
+
+  if (!rows.length) return;
+
+  for (const item of rows) {
+    const wrap = document.createElement("div");
+    wrap.className = "rep-slipup-item" + (repSlipupsExpandedPlay === item.entry.play ? " open" : "");
+
+    const row = document.createElement("div");
+    row.className = "rep-slipup-row";
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-expanded", wrap.classList.contains("open") ? "true" : "false");
+    row.tabIndex = 0;
+
+    const badge = document.createElement("span");
+    badge.className = "qbadge " + item.worst;
+    badge.textContent = item.worst === "blunder" ? "??" : "?";
+
+    const chev = document.createElement("span");
+    chev.className = "chev";
+    chev.textContent = "▸";
+    chev.setAttribute("aria-hidden", "true");
+
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = item.entry.name + (item.entry.eco ? ` (${item.entry.eco})` : "");
+
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = `${item.issueGames} game${item.issueGames === 1 ? "" : "s"} · ${formatSlipCounts(item.counts)}`;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "primary";
+    btn.textContent = "Practice";
+    btn.onclick = e => {
+      e.stopPropagation();
+      setRepColor(state.repColor);
+      startPractice(item.entry);
+    };
+
+    row.append(badge, chev, nm, meta, btn);
+    row.onclick = () => {
+      repSlipupsExpandedPlay = repSlipupsExpandedPlay === item.entry.play ? "" : item.entry.play;
+      renderRepSlipups();
+    };
+    row.onkeydown = e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        row.click();
+      }
+    };
+
+    const gamesEl = document.createElement("div");
+    gamesEl.className = "rep-slipup-games";
+    const games = (item.games || []).slice().sort((a, b) =>
+      String(b.date || "").localeCompare(String(a.date || "")));
+    if (!games.length) {
+      const empty = document.createElement("div");
+      empty.className = "rep-empty";
+      empty.style.padding = "8px 12px";
+      empty.textContent = "No game details available.";
+      gamesEl.appendChild(empty);
+    } else {
+      for (const g of games) gamesEl.appendChild(makeSlipupGameRow(g));
+    }
+
+    wrap.append(row, gamesEl);
+    listEl.appendChild(wrap);
+  }
+}
+
+function scheduleRepSlipupsRefresh() {
+  clearTimeout(repSlipupsTimer);
+  repSlipupsTimer = setTimeout(() => { refreshRepSlipups(); }, 80);
+}
+
+async function refreshRepSlipups() {
+  if (!state.repertoireOpen) return;
+  const statusEl = document.getElementById("rep-slipups-status");
+  const listEl = document.getElementById("rep-slipups-list");
+  if (!statusEl || !listEl) return;
+
+  const entries = state.myRepertoire[state.repColor] || [];
+  if (!entries.length) {
+    repSlipupsByPlay = {};
+    repSlipupsScanKey = "";
+    listEl.innerHTML = "";
+    setSlipupsStatus("Add openings to your repertoire to see early-opening slip-ups here.");
+    return;
+  }
+
+  if (!state.report) {
+    repSlipupsByPlay = {};
+    repSlipupsScanKey = "";
+    listEl.innerHTML = "";
+    setSlipupsStatus("Analyze your games first to see early-opening slip-ups (moves 1–6) here.");
+    return;
+  }
+
+  const key = slipupsCacheKey();
+  if (key === repSlipupsScanKey && !repSlipupsBusy) {
+    if (!Object.values(repSlipupsByPlay).some(x => x.issueGames > 0)) {
+      setSlipupsStatus("No early-opening mistakes (moves 1–6) in your repertoire lines.");
+    } else {
+      setSlipupsStatus("");
+    }
+    renderRepSlipups();
+    renderPracticeList();
+    return;
+  }
+
+  if (repSlipupsBusy) {
+    scheduleRepSlipupsRefresh();
+    return;
+  }
+  repSlipupsBusy = true;
+  setSlipupsStatus("Scanning early opening (moves 1–6) for slip-ups…");
+  listEl.innerHTML = "";
+
+  try {
+    // Build game batches linked to each repertoire entry (cap total scans).
+    const MAX_SCAN = 40;
+    const perEntryGames = [];
+    let totalQueued = 0;
+    for (const entry of entries) {
+      const games = collectGamesForRepEntry(entry);
+      perEntryGames.push({ entry, games });
+      totalQueued += games.length;
+    }
+    if (!totalQueued) {
+      repSlipupsByPlay = {};
+      repSlipupsScanKey = key;
+      setSlipupsStatus("No analyzed games match your repertoire lines yet.");
+      renderPracticeList();
+      return;
+    }
+
+    // Fair share across entries, then fill remaining slots.
+    const take = new Map(); // entry.play -> games[]
+    for (const { entry, games } of perEntryGames) take.set(entry.play, []);
+    let remaining = MAX_SCAN;
+    let progressed = true;
+    while (remaining > 0 && progressed) {
+      progressed = false;
+      for (const { entry, games } of perEntryGames) {
+        if (remaining <= 0) break;
+        const bucket = take.get(entry.play);
+        if (bucket.length >= games.length) continue;
+        bucket.push(games[bucket.length]);
+        remaining -= 1;
+        progressed = true;
+      }
+    }
+
+    const batch = [];
+    const batchMeta = []; // { play, entry, game }
+    for (const { entry } of perEntryGames) {
+      for (const g of take.get(entry.play)) {
+        batchMeta.push({ play: entry.play, entry, game: g });
+        batch.push({
+          san: g.san,
+          color: state.repColor,
+          variation: g.variation || entry.name,
+          opponent: g.opponent,
+          date: g.date,
+          url: g.url,
+        });
+      }
+    }
+
+    const data = await api("/api/scan-blunders", "POST", {
+      games: batch,
+      opening_plies: REP_SLIPUP_OPENING_PLIES,
+    });
+
+    const byPlay = {};
+    for (const entry of entries) {
+      byPlay[entry.play] = {
+        entry,
+        worst: null,
+        counts: { blunder: 0, mistake: 0 },
+        issueGames: 0,
+        games: [],
+      };
+    }
+
+    for (const sg of (data.games || [])) {
+      const meta = batchMeta[sg.index];
+      if (!meta) continue;
+      const slot = byPlay[meta.play];
+      if (!slot) continue;
+      const { flags, counts, worst } = slipFlagsFromScan(sg);
+      if (!worst) continue; // no early-opening mistake/blunder
+      const g = meta.game;
+      g._flags = flags;
+      g._worst = worst;
+      g._counts = counts;
+      slot.issueGames += 1;
+      slot.counts = mergeCounts(slot.counts, counts);
+      slot.worst = slot.worst ? worseSeverity(slot.worst, worst) : worst;
+      slot.games.push(g);
+    }
+
+    repSlipupsByPlay = byPlay;
+    repSlipupsScanKey = key;
+
+    const withIssues = Object.values(byPlay).filter(x => x.issueGames > 0).length;
+    if (!withIssues) {
+      setSlipupsStatus("No early-opening mistakes (moves 1–6) in your repertoire lines.");
+      listEl.innerHTML = "";
+    } else {
+      setSlipupsStatus("");
+      renderRepSlipups();
+    }
+    renderPracticeList();
+  } catch (e) {
+    if (handleProGateError(e)) {
+      setSlipupsStatus("Pro required to scan for early-opening slip-ups.");
+    } else {
+      setSlipupsStatus(e.message || "Could not scan for slip-ups.");
+    }
+  } finally {
+    repSlipupsBusy = false;
+  }
 }
 
 function renderPracticeList() {
@@ -4396,9 +5456,16 @@ function renderPracticeList() {
   for (const entry of list) {
     const row = document.createElement("div");
     row.className = "rep-practice-row";
+    row.dataset.play = entry.play;
+    const slip = repSlipupsByPlay[entry.play];
     row.innerHTML =
       `<span class="eco">${entry.eco || ""}</span>` +
       `<span class="nm"></span>` +
+      (slip?.worst
+        ? `<span class="slip-badge ${slip.worst}" title="${formatSlipCounts(slip.counts)}">${
+            slip.worst === "blunder" ? "??" : "?"
+          }</span>`
+        : "") +
       `<button type="button" class="primary" data-act="practice">Practice</button>` +
       `<button type="button" data-act="load">Load line</button>` +
       `<button type="button" data-act="remove">Remove</button>`;
@@ -4486,6 +5553,9 @@ function loadRepLine(entry, enterPractice) {
   rebuildDerived();
   state.ply = state.sans.length;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = entry.name;
   state.orientation = state.repColor;
   if (enterPractice) {
@@ -4506,6 +5576,10 @@ function stopPractice() {
 }
 
 function startPractice(entry) {
+  if (currentUser?.billing_enabled && !currentUser.is_pro) {
+    openUpgradeModal();
+    return;
+  }
   state.practiceElo = +document.getElementById("rep-difficulty").value || 1800;
   loadRepLine(entry, true);
   const st = document.getElementById("rep-practice-status");
@@ -4572,8 +5646,8 @@ function startRandomPractice(colorChoice) {
   if (st) {
     const label = `${picked.entry.name}${picked.entry.eco ? ` (${picked.entry.eco})` : ""}`;
     st.textContent = picked.color === "black"
-      ? `Random · ${label}. Stockfish (White) is thinking…`
-      : `Random · ${label}. Your move as White.`;
+      ? `Practice All · ${label}. Stockfish (White) is thinking…`
+      : `Practice All · ${label}. Your move as White.`;
   }
 }
 
@@ -4621,7 +5695,13 @@ async function runPracticeReply() {
     document.getElementById("rep-practice-status").textContent =
       `Stockfish played ${data.san}. Your move.`;
   } catch (e) {
-    document.getElementById("rep-practice-status").textContent = e.message;
+    if (handleProGateError(e)) {
+      stopPractice();
+      document.getElementById("rep-practice-status").textContent =
+        "Pro required for Practice vs Stockfish.";
+    } else {
+      document.getElementById("rep-practice-status").textContent = e.message;
+    }
   } finally {
     practiceBusy = false;
   }
@@ -4640,6 +5720,7 @@ async function openRepertoire() {
   setBoardTitle("My Repertoire");
   await ensureRepTree();
   renderPracticeList();
+  scheduleRepSlipupsRefresh();
   requestAnimationFrame(syncSidebarToBoard);
 }
 
@@ -4682,7 +5763,7 @@ document.querySelectorAll("#practice-color-modal .color-choice-row button").forE
 /* ---------- init ---------- */
 
 const BOARD_THEME_LS = "boardTheme";
-const BOARD_THEMES = ["green", "blue", "pink", "grey"];
+const BOARD_THEMES = ["blue", "green", "pink", "grey"];
 
 function syncThemeSwatches(theme) {
   document.querySelectorAll("#theme-swatches .theme-swatch").forEach(btn => {
@@ -4693,7 +5774,7 @@ function syncThemeSwatches(theme) {
 }
 
 function applyBoardTheme(theme, { persist = true } = {}) {
-  const t = BOARD_THEMES.includes(theme) ? theme : "green";
+  const t = BOARD_THEMES.includes(theme) ? theme : "blue";
   document.documentElement.setAttribute("data-board-theme", t);
   if (persist) {
     try { localStorage.setItem(BOARD_THEME_LS, t); } catch (e) { /* ignore */ }
@@ -4705,7 +5786,7 @@ function applyBoardTheme(theme, { persist = true } = {}) {
 }
 
 function initBoardTheme() {
-  let saved = "green";
+  let saved = "blue";
   try {
     const v = localStorage.getItem(BOARD_THEME_LS);
     if (BOARD_THEMES.includes(v)) saved = v;
@@ -4722,11 +5803,13 @@ function initBoardTheme() {
 }
 
 initBoardTheme();
+initBillingUi();
 initRecentUsernames();
 loadRepertoireFromLocal();
 rebuildDerived();
 refreshBoard();
 updateEditTurnBtns();
+syncProChips();
 requestAnimationFrame(syncSidebarToBoard);
 </script>
 </body>
