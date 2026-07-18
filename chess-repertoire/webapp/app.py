@@ -16,6 +16,9 @@ move sequence (proxied from the Lichess opening explorer, cached).
 POST /api/scan-blunders scans opening moves in a batch of games for
 inaccuracies/mistakes/blunders and returns per-game flags plus repeated
 patterns within the same variation.
+
+POST /api/annotate-game runs a full-game Stockfish review and returns
+chess.com-style move annotations (blunder/mistake/great/best/brilliant).
 """
 
 from __future__ import annotations
@@ -283,6 +286,8 @@ _engine_lock = threading.Lock()
 _eval_cache: dict[str, dict] = {}
 _scan_eval_cache: dict[str, dict] = {}  # shallower depth cache for blunder scans
 _scan_cache: dict[str, dict] = {}       # game-key -> scan result
+_annotate_eval_cache: dict[str, list] = {}  # fen+depth -> multipv lines
+_annotate_cache: dict[str, list] = {}       # san-key -> annotations
 _opening_cache: dict[str, dict] = {}    # UCI play string -> {name, eco}
 
 
@@ -731,6 +736,57 @@ def scan_blunders():
         "scanned": len(out_games),
         "games": out_games,
         "patterns": patterns,
+    })
+
+
+@app.post("/api/annotate-game")
+def annotate_game():
+    """Full-game Stockfish review with chess.com-style move badges.
+
+    Body: { san: ["e4", "c5", ...], depth?: int }
+    """
+    data = _json_body()
+    san = data.get("san") or []
+    if not isinstance(san, list) or not san:
+        return jsonify({"error": "san array is required"}), 400
+    san = [str(m) for m in san[: classify.ANNOTATE_MAX_PLIES]]
+
+    depth = data.get("depth") or classify.ANNOTATE_DEPTH
+    try:
+        depth = max(8, min(16, int(depth)))
+    except (TypeError, ValueError):
+        depth = classify.ANNOTATE_DEPTH
+
+    cache_key = f"{depth}|{' '.join(san)}"
+    if cache_key in _annotate_cache:
+        return jsonify({
+            "depth": depth,
+            "plies": len(san),
+            "annotations": _annotate_cache[cache_key],
+        })
+
+    with _engine_lock:
+        engine = _get_engine()
+        if engine is None:
+            return jsonify({"error": "Stockfish engine not found"}), 503
+        try:
+            flags = classify.annotate_game(
+                engine,
+                san,
+                depth=depth,
+                max_plies=classify.ANNOTATE_MAX_PLIES,
+                eval_cache=_annotate_eval_cache,
+            )
+        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+            _reset_engine()
+            return jsonify({"error": f"engine failed: {exc}"}), 500
+
+    annotations = [asdict(f) for f in flags]
+    _annotate_cache[cache_key] = annotations
+    return jsonify({
+        "depth": depth,
+        "plies": len(san),
+        "annotations": annotations,
     })
 
 
