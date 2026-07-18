@@ -44,6 +44,14 @@ from repertoire import analyze, classify, fetch, lichess, moves, openings, parse
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP_DIR = Path(__file__).resolve().parent
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
 IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
 
 _data_dir = os.environ.get("DATA_DIR", "").strip()

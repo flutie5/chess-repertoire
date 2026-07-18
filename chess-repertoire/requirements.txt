@@ -4,4 +4,5 @@ chess>=1.10
 gunicorn>=22.0
 flask-cors>=4.0
 google-auth>=2.29
+python-dotenv>=1.0
 
