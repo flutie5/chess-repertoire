@@ -19,6 +19,9 @@ patterns within the same variation.
 
 POST /api/annotate-game runs a full-game Stockfish review and returns
 chess.com-style move annotations (blunder/mistake/great/best/brilliant).
+
+Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
+/api/billing/webhook. Pro gates annotate-*, scan-blunders, practice-move.
 """
 
 from __future__ import annotations
@@ -242,11 +245,46 @@ def _migrate_users(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"
         )
+    billing_cols = {
+        "stripe_customer_id": "TEXT",
+        "stripe_subscription_id": "TEXT",
+        "plan": "TEXT NOT NULL DEFAULT 'free'",
+        "plan_interval": "TEXT",
+        "plan_status": "TEXT",
+        "plan_expires_at": "INTEGER",
+    }
+    for name, decl in billing_cols.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
 
 
 _init_db()
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "").strip()
+STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY", "").strip()
+PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
+
+_stripe = None
+if STRIPE_SECRET_KEY:
+    try:
+        import stripe as _stripe_mod
+        _stripe_mod.api_key = STRIPE_SECRET_KEY
+        _stripe = _stripe_mod
+    except ImportError:
+        print("WARNING: stripe package not installed; billing disabled", flush=True)
+
+
+def _billing_configured() -> bool:
+    return bool(
+        _stripe
+        and STRIPE_SECRET_KEY
+        and STRIPE_PRICE_MONTHLY
+        and STRIPE_PRICE_YEARLY
+    )
 
 
 def _current_user() -> sqlite3.Row | None:
@@ -262,10 +300,57 @@ def _user_has_password(user: sqlite3.Row) -> bool:
     return bool(pw)
 
 
+def _user_col(user: sqlite3.Row, name: str, default=None):
+    keys = user.keys()
+    return user[name] if name in keys else default
+
+
+def _is_pro(user: sqlite3.Row | None) -> bool:
+    if user is None:
+        return False
+    plan = (_user_col(user, "plan") or "free").lower()
+    status = (_user_col(user, "plan_status") or "").lower()
+    if plan != "pro":
+        return False
+    return status in ("active", "trialing", "past_due")
+
+
+def _require_login():
+    """Return (user, None) or (None, (jsonify_response, status))."""
+    user = _current_user()
+    if user is None:
+        return None, (jsonify({
+            "error": "Sign in required",
+            "code": "login_required",
+        }), 401)
+    return user, None
+
+
+def _require_pro():
+    """Return (user, None) or (None, (jsonify_response, status)).
+
+    When Stripe is not configured (local/dev), allow access.
+    """
+    user, err = _require_login()
+    if err:
+        return None, err
+    if not _billing_configured():
+        return user, None
+    if not _is_pro(user):
+        return None, (jsonify({
+            "error": "Pro subscription required",
+            "code": "pro_required",
+        }), 402)
+    return user, None
+
+
 def _user_payload(user: sqlite3.Row) -> dict:
     keys = user.keys()
     display = user["display_name"] if "display_name" in keys else ""
     google_sub = user["google_sub"] if "google_sub" in keys else None
+    plan = _user_col(user, "plan") or "free"
+    plan_interval = _user_col(user, "plan_interval")
+    plan_status = _user_col(user, "plan_status")
     return {
         "email": user["email"],
         "display_name": display or "",
@@ -273,6 +358,11 @@ def _user_payload(user: sqlite3.Row) -> dict:
         "lichess_username": user["lichess_username"],
         "has_password": _user_has_password(user),
         "auth_provider": "google" if google_sub else "password",
+        "plan": plan,
+        "plan_interval": plan_interval,
+        "plan_status": plan_status,
+        "is_pro": _is_pro(user) or not _billing_configured(),
+        "billing_enabled": _billing_configured(),
     }
 
 # In-memory cache of parsed games + move lists per (username, months).
@@ -567,6 +657,9 @@ def evaluate():
 @app.post("/api/practice-move")
 def practice_move():
     """Return one Stockfish move at a reduced Elo for repertoire practice."""
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     fen = (data.get("fen") or "").strip()
     if not fen:
@@ -664,6 +757,9 @@ def scan_blunders():
     }
     Caps the batch to keep Render-friendly response times.
     """
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     games_in = data.get("games")
     if not isinstance(games_in, list) or not games_in:
@@ -745,6 +841,9 @@ def annotate_game():
 
     Body: { san: ["e4", "c5", ...], depth?: int }
     """
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     san = data.get("san") or []
     if not isinstance(san, list) or not san:
@@ -788,6 +887,354 @@ def annotate_game():
         "plies": len(san),
         "annotations": annotations,
     })
+
+
+@app.post("/api/annotate-ply")
+def annotate_ply():
+    """Classify a single exploratory move (position before + SAN).
+
+    Body: { fen: "...", san: "h4", ply?: int, depth?: int }
+    """
+    _user, err = _require_pro()
+    if err:
+        return err
+    data = _json_body()
+    fen = (data.get("fen") or "").strip()
+    san = (data.get("san") or "").strip()
+    if not fen or not san:
+        return jsonify({"error": "fen and san are required"}), 400
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return jsonify({"error": "invalid FEN"}), 400
+
+    ply = data.get("ply") or (len(board.move_stack) + 1)
+    try:
+        ply = max(1, int(ply))
+    except (TypeError, ValueError):
+        ply = 1
+
+    depth = data.get("depth") or classify.ANNOTATE_DEPTH
+    try:
+        depth = max(8, min(16, int(depth)))
+    except (TypeError, ValueError):
+        depth = classify.ANNOTATE_DEPTH
+
+    with _engine_lock:
+        engine = _get_engine()
+        if engine is None:
+            return jsonify({"error": "Stockfish engine not found"}), 503
+        try:
+            ann = classify.annotate_ply(
+                engine,
+                board,
+                san,
+                ply=ply,
+                depth=depth,
+                eval_cache=_annotate_eval_cache,
+                mark_quiet_best=True,
+            )
+        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+            _reset_engine()
+            return jsonify({"error": f"engine failed: {exc}"}), 500
+
+    return jsonify({
+        "depth": depth,
+        "annotation": asdict(ann) if ann else None,
+    })
+
+
+# ---- Stripe billing ----
+
+def _app_base_url() -> str:
+    if PUBLIC_APP_URL:
+        return PUBLIC_APP_URL
+    # Prefer proxy / Host header when behind Netlify
+    proto = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    return f"{proto}://{host}".rstrip("/")
+
+
+def _price_id_for_interval(interval: str) -> str | None:
+    if interval == "year":
+        return STRIPE_PRICE_YEARLY or None
+    if interval == "month":
+        return STRIPE_PRICE_MONTHLY or None
+    return None
+
+
+def _interval_for_price(price_id: str | None) -> str | None:
+    if not price_id:
+        return None
+    if price_id == STRIPE_PRICE_YEARLY:
+        return "year"
+    if price_id == STRIPE_PRICE_MONTHLY:
+        return "month"
+    return None
+
+
+def _subscription_as_dict(subscription) -> dict:
+    """Normalize Stripe Subscription (object or webhook dict) to a plain dict."""
+    if subscription is None:
+        return {}
+    if isinstance(subscription, dict):
+        items = (subscription.get("items") or {}).get("data") or []
+        price_id = None
+        if items:
+            price_id = (items[0].get("price") or {}).get("id")
+        return {
+            "id": subscription.get("id"),
+            "status": subscription.get("status") or "",
+            "customer": subscription.get("customer"),
+            "current_period_end": subscription.get("current_period_end"),
+            "price_id": price_id,
+            "metadata": subscription.get("metadata") or {},
+        }
+    customer = getattr(subscription, "customer", None)
+    if hasattr(customer, "id"):
+        customer = customer.id
+    price_id = None
+    items = getattr(subscription, "items", None)
+    if items and getattr(items, "data", None):
+        price = items.data[0].price
+        price_id = getattr(price, "id", None)
+    meta = getattr(subscription, "metadata", None) or {}
+    if hasattr(meta, "to_dict"):
+        meta = meta.to_dict()
+    elif not isinstance(meta, dict):
+        try:
+            meta = dict(meta)
+        except Exception:
+            meta = {}
+    return {
+        "id": getattr(subscription, "id", None),
+        "status": getattr(subscription, "status", None) or "",
+        "customer": customer,
+        "current_period_end": getattr(subscription, "current_period_end", None),
+        "price_id": price_id,
+        "metadata": meta,
+    }
+
+
+def _apply_subscription_to_user(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int | None = None,
+    stripe_customer_id: str | None = None,
+    subscription,
+) -> None:
+    """Sync plan fields from a Stripe Subscription object or dict."""
+    sub = _subscription_as_dict(subscription)
+    if not sub:
+        return
+    status = (sub.get("status") or "").lower()
+    sub_id = sub.get("id")
+    customer = sub.get("customer") or stripe_customer_id
+    interval = _interval_for_price(sub.get("price_id"))
+    period_end = sub.get("current_period_end")
+    plan = "pro" if status in ("active", "trialing", "past_due") else "free"
+
+    where = ""
+    args: list = []
+    if user_id is not None:
+        where = "id = ?"
+        args = [user_id]
+    elif customer:
+        where = "stripe_customer_id = ?"
+        args = [customer]
+    else:
+        return
+
+    conn.execute(
+        f"""
+        UPDATE users SET
+            stripe_customer_id = COALESCE(?, stripe_customer_id),
+            stripe_subscription_id = ?,
+            plan = ?,
+            plan_interval = ?,
+            plan_status = ?,
+            plan_expires_at = ?
+        WHERE {where}
+        """,
+        (
+            customer,
+            sub_id,
+            plan,
+            interval,
+            status,
+            int(period_end) if period_end else None,
+            *args,
+        ),
+    )
+
+
+@app.post("/api/billing/checkout")
+def billing_checkout():
+    """Create a Stripe Checkout Session for Pro (month or year)."""
+    if not _billing_configured():
+        return jsonify({"error": "Billing is not configured"}), 503
+    user, err = _require_login()
+    if err:
+        return err
+
+    data = _json_body()
+    interval = (data.get("interval") or "month").lower()
+    if interval not in ("month", "year"):
+        return jsonify({"error": "interval must be month or year"}), 400
+    price_id = _price_id_for_interval(interval)
+    if not price_id:
+        return jsonify({"error": "Price not configured"}), 503
+
+    base = _app_base_url()
+    customer_id = _user_col(user, "stripe_customer_id")
+    try:
+        params = {
+            "mode": "subscription",
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": f"{base}/?billing=success",
+            "cancel_url": f"{base}/?billing=cancel",
+            "client_reference_id": str(user["id"]),
+            "metadata": {"user_id": str(user["id"])},
+            "subscription_data": {
+                "metadata": {"user_id": str(user["id"])},
+            },
+            "allow_promotion_codes": True,
+        }
+        email = (user["email"] or "").strip()
+        if customer_id:
+            params["customer"] = customer_id
+        elif email:
+            params["customer_email"] = email
+
+        session_obj = _stripe.checkout.Session.create(**params)
+    except Exception as exc:
+        print(f"WARNING: Stripe checkout failed: {exc}", flush=True)
+        return jsonify({"error": f"Checkout failed: {exc}"}), 500
+
+    return jsonify({"url": session_obj.url, "session_id": session_obj.id})
+
+
+@app.post("/api/billing/portal")
+def billing_portal():
+    """Stripe Customer Portal for managing/canceling Pro."""
+    if not _billing_configured():
+        return jsonify({"error": "Billing is not configured"}), 503
+    user, err = _require_login()
+    if err:
+        return err
+    customer_id = _user_col(user, "stripe_customer_id")
+    if not customer_id:
+        return jsonify({"error": "No billing account yet — subscribe first"}), 400
+    base = _app_base_url()
+    try:
+        portal = _stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{base}/",
+        )
+    except Exception as exc:
+        print(f"WARNING: Stripe portal failed: {exc}", flush=True)
+        return jsonify({"error": f"Portal failed: {exc}"}), 500
+    return jsonify({"url": portal.url})
+
+
+@app.post("/api/billing/webhook")
+def billing_webhook():
+    """Stripe webhook — sync subscription state onto users."""
+    if not _stripe or not STRIPE_WEBHOOK_SECRET:
+        return jsonify({"error": "Webhook not configured"}), 503
+    payload = request.get_data()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        event = _stripe.Webhook.construct_event(
+            payload, sig, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        return jsonify({"error": "Invalid payload"}), 400
+    except Exception as exc:
+        # SignatureVerificationError and others
+        print(f"WARNING: Stripe webhook verify failed: {exc}", flush=True)
+        return jsonify({"error": "Invalid signature"}), 400
+
+    etype = event["type"]
+    obj = event["data"]["object"]
+    if hasattr(obj, "to_dict"):
+        obj = obj.to_dict()
+    elif not isinstance(obj, dict):
+        try:
+            obj = dict(obj)
+        except Exception:
+            obj = {}
+
+    def _uid_from(meta_or_ref) -> int | None:
+        if meta_or_ref is None:
+            return None
+        try:
+            return int(meta_or_ref)
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        with _db() as conn:
+            if etype == "checkout.session.completed":
+                user_id = _uid_from(
+                    obj.get("client_reference_id")
+                    or (obj.get("metadata") or {}).get("user_id")
+                )
+                customer = obj.get("customer")
+                sub_id = obj.get("subscription")
+                if customer and user_id is not None:
+                    conn.execute(
+                        "UPDATE users SET stripe_customer_id = ? WHERE id = ?",
+                        (customer, user_id),
+                    )
+                if sub_id:
+                    sub = _stripe.Subscription.retrieve(sub_id)
+                    _apply_subscription_to_user(
+                        conn,
+                        user_id=user_id,
+                        stripe_customer_id=customer,
+                        subscription=sub,
+                    )
+
+            elif etype == "customer.subscription.updated":
+                meta = obj.get("metadata") or {}
+                user_id = _uid_from(meta.get("user_id"))
+                _apply_subscription_to_user(
+                    conn,
+                    user_id=user_id,
+                    stripe_customer_id=obj.get("customer"),
+                    subscription=obj,
+                )
+
+            elif etype == "customer.subscription.deleted":
+                meta = obj.get("metadata") or {}
+                user_id = _uid_from(meta.get("user_id"))
+                customer = obj.get("customer")
+                sub_id = obj.get("id")
+                if user_id is not None:
+                    where, args = "id = ?", [user_id]
+                elif customer:
+                    where, args = "stripe_customer_id = ?", [customer]
+                else:
+                    where, args = "", []
+                if where:
+                    conn.execute(
+                        f"""
+                        UPDATE users SET
+                            plan = 'free',
+                            plan_status = 'canceled',
+                            stripe_subscription_id = ?,
+                            plan_interval = NULL,
+                            plan_expires_at = NULL
+                        WHERE {where}
+                        """,
+                        (sub_id, *args),
+                    )
+    except Exception as exc:
+        print(f"WARNING: Stripe webhook handler failed: {exc}", flush=True)
+        return jsonify({"error": "Handler failed"}), 500
+
+    return jsonify({"ok": True})
 
 
 MAX_FETCH_MONTHS = 240  # widest window we'll fetch (20 years ~ all history)

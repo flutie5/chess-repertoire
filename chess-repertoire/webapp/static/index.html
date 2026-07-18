@@ -6,7 +6,7 @@
 <title>Chess Repertoire Explorer</title>
 <link rel="icon" href="data:,">
 <style>
-  :root, html[data-board-theme="green"] {
+  :root, html[data-board-theme="blue"] {
     /* Surfaces */
     --bg-page: #312e2b;
     --bg-card: #262421;
@@ -15,17 +15,17 @@
     --border-subtle: rgba(255, 255, 255, 0.08);
 
     /* Brand / accent (name kept as --green for existing CSS) */
-    --green: #81b64c;
-    --green-hover: #8fc25b;
-    --green-shadow: #45753c;
-    --green-soft: rgba(129, 182, 76, 0.18);
-    --green-soft-2: rgba(129, 182, 76, 0.14);
-    --green-soft-3: rgba(129, 182, 76, 0.35);
-    --green-soft-4: rgba(129, 182, 76, 0.45);
+    --green: #4d8fd9;
+    --green-hover: #63a0e3;
+    --green-shadow: #2a5f9a;
+    --green-soft: rgba(77, 143, 217, 0.2);
+    --green-soft-2: rgba(77, 143, 217, 0.14);
+    --green-soft-3: rgba(77, 143, 217, 0.4);
+    --green-soft-4: rgba(77, 143, 217, 0.5);
 
     /* Board */
-    --board-light: #ebecd0;
-    --board-dark: #779556;
+    --board-light: #dee3ef;
+    --board-dark: #4b7399;
 
     /* Semantic */
     --loss-red: #fa412d;
@@ -49,16 +49,16 @@
     --hl-brilliant: rgba(143, 211, 255, 0.6); /* light blue */
     --hl-best: rgba(129, 182, 76, 0.5);
   }
-  html[data-board-theme="blue"] {
-    --green: #4d8fd9;
-    --green-hover: #63a0e3;
-    --green-shadow: #2a5f9a;
-    --green-soft: rgba(77, 143, 217, 0.2);
-    --green-soft-2: rgba(77, 143, 217, 0.14);
-    --green-soft-3: rgba(77, 143, 217, 0.4);
-    --green-soft-4: rgba(77, 143, 217, 0.5);
-    --board-light: #dee3ef;
-    --board-dark: #4b7399;
+  html[data-board-theme="green"] {
+    --green: #81b64c;
+    --green-hover: #8fc25b;
+    --green-shadow: #45753c;
+    --green-soft: rgba(129, 182, 76, 0.18);
+    --green-soft-2: rgba(129, 182, 76, 0.14);
+    --green-soft-3: rgba(129, 182, 76, 0.35);
+    --green-soft-4: rgba(129, 182, 76, 0.45);
+    --board-light: #ebecd0;
+    --board-dark: #779556;
   }
   html[data-board-theme="pink"] {
     --green: #d46a9a;
@@ -907,6 +907,43 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   }
   .modal h2 { margin: 0 0 2px; font-size: 18px; }
+  #upgrade-modal .modal { width: min(92vw, 420px); }
+  #upgrade-modal .upgrade-prices {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #upgrade-modal .upgrade-prices button {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    text-align: left; width: 100%;
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 12px 14px; cursor: pointer; font: inherit;
+  }
+  #upgrade-modal .upgrade-prices button:hover { border-color: var(--green); }
+  #upgrade-modal .upgrade-prices button .price {
+    font-size: 16px; font-weight: 800;
+  }
+  #upgrade-modal .upgrade-prices button .hint {
+    font-size: 12px; color: var(--text-muted); font-weight: 500;
+  }
+  #upgrade-modal .upgrade-prices button.featured {
+    border-color: var(--green); background: var(--green-soft);
+  }
+  .pro-chip {
+    display: inline-block; margin-left: 8px;
+    font-size: 10px; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; vertical-align: middle;
+    color: var(--green); border: 1px solid var(--green-soft-4);
+    border-radius: 4px; padding: 2px 6px;
+  }
+  .plan-badge {
+    display: inline-block; font-size: 12px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border-subtle); color: var(--text-muted);
+  }
+  .plan-badge.pro {
+    color: var(--green); border-color: var(--green-soft-4);
+  }
   .modal label {
     display: flex; flex-direction: column; gap: 4px;
     font-size: 13px; color: var(--text-secondary);
@@ -1334,6 +1371,29 @@
   </div>
 </header>
 
+<div class="modal-overlay" id="upgrade-modal" role="dialog" aria-labelledby="upgrade-title" aria-modal="true">
+  <div class="modal">
+    <h2 id="upgrade-title">Unlock Pro</h2>
+    <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
+      Game Review, Recent Slip-ups, and Practice vs Stockfish.
+    </p>
+    <div class="upgrade-prices">
+      <button type="button" id="upgrade-month-btn" data-interval="month">
+        <span class="price">$6 / month</span>
+        <span class="hint">Cancel anytime</span>
+      </button>
+      <button type="button" id="upgrade-year-btn" class="featured" data-interval="year">
+        <span class="price">$40 / year</span>
+        <span class="hint">Save ~$32 vs monthly</span>
+      </button>
+    </div>
+    <div class="form-msg" id="upgrade-msg"></div>
+    <div class="modal-actions">
+      <button class="ghost" type="button" id="upgrade-cancel-btn">Not now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="auth-modal">
   <div class="modal">
     <h2>Sign in to save your repertoire</h2>
@@ -1384,6 +1444,11 @@
       <input id="profile-email" type="email" disabled>
     </label>
     <div class="profile-row" id="profile-link-status"></div>
+    <div class="profile-row" style="margin-top:10px;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="plan-badge" id="profile-plan-badge">Free</span>
+      <button class="primary" type="button" id="profile-upgrade-btn" style="display:none">Upgrade to Pro</button>
+      <button class="ghost" type="button" id="profile-billing-btn" style="display:none">Manage billing</button>
+    </div>
   </div>
 
   <div class="profile-card">
@@ -1404,15 +1469,15 @@
 
   <div class="profile-card" id="profile-theme-card">
     <h2>Board color</h2>
-    <p class="hint">Changes the dark squares and the accent color across the app. Green is the default.</p>
+    <p class="hint">Changes the dark squares and the accent color across the app. Blue is the default.</p>
     <div class="theme-swatches" id="theme-swatches" role="radiogroup" aria-label="Board color">
-      <button type="button" class="theme-swatch active" data-theme="green" aria-pressed="true">
-        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        Green
-      </button>
-      <button type="button" class="theme-swatch" data-theme="blue" aria-pressed="false">
+      <button type="button" class="theme-swatch active" data-theme="blue" aria-pressed="true">
         <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         Blue
+      </button>
+      <button type="button" class="theme-swatch" data-theme="green" aria-pressed="false">
+        <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Green
       </button>
       <button type="button" class="theme-swatch" data-theme="pink" aria-pressed="false">
         <span class="preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -1607,7 +1672,7 @@
   </aside>
 
   <section id="repertoire-practice" aria-label="Practice repertoire">
-    <h3>Practice vs Stockfish</h3>
+    <h3>Practice vs Stockfish <span class="pro-chip" id="practice-pro-chip" hidden>Pro</span></h3>
     <div class="rep-practice-toolbar">
       <label>Difficulty
         <select id="rep-difficulty" title="Opponent Elo">
@@ -1632,7 +1697,7 @@
       <div class="rep-empty">No openings saved yet. Add some from the tree on the right.</div>
     </div>
     <div id="rep-slipups" aria-live="polite">
-      <h4>Recent slip-ups</h4>
+      <h4>Recent slip-ups <span class="pro-chip" id="slipups-pro-chip" hidden>Pro</span></h4>
       <div id="rep-slipups-status">Analyze your games first to see early-opening slip-ups (moves 1–6) here.</div>
       <div id="rep-slipups-list"></div>
     </div>
@@ -1654,7 +1719,9 @@ const state = {
   sans: [],                 // SAN of every move in the current game
   fens: [START_FEN],        // fens[i] = position after i plies
   moves: [],                // verbose chess.js move objects
-  moveFlags: [],            // opening blunder/mistake flags for current game
+  moveFlags: [],            // game-review flags for the original main line
+  mainLineSans: [],         // original game SAN; explore moves diverge from this
+  exploreAnns: {},          // ply -> annotation for off-main-line explorations
   lastOpeningName: null,    // deepest opening name recognized for current line
   editMode: false,         // free-place position editor
   boardPlayers: null,      // { white:{name,rating}, black:{name,rating} } when a game is loaded
@@ -1700,7 +1767,11 @@ function truncateToPly() {
 
 function makeUserMove(from, to, promotion) {
   if (state.editMode || freeFen) return false;
-  if (state.ply < state.sans.length) truncateToPly();
+  if (state.ply < state.sans.length) {
+    truncateToPly();
+    clearExploreAnnsFrom(state.ply + 1);
+  }
+  const fenBefore = currentFen();
   try {
     game.move({ from, to, promotion });
   } catch (e) {
@@ -1708,7 +1779,11 @@ function makeUserMove(from, to, promotion) {
   }
   rebuildDerived();
   state.ply = state.sans.length;
+  clearExploreAnnsFrom(state.ply);
   refreshBoard();
+  if (!isMainLinePly(state.ply)) {
+    scheduleExploreAnnotate(state.ply, fenBefore, state.sans[state.ply - 1]);
+  }
   if (state.practiceMode) schedulePracticeReply();
   return true;
 }
@@ -1743,6 +1818,7 @@ function undoLastAction() {
   if (state.ply <= 0) return false;
   state.ply -= 1;
   truncateToPly();
+  clearExploreAnnsFrom(state.ply + 1);
   refreshBoard();
   return true;
 }
@@ -1879,12 +1955,64 @@ const ANN_GLYPH = {
   brilliant: "★",
 };
 
+function clearExploreAnnsFrom(ply) {
+  if (!state.exploreAnns) state.exploreAnns = {};
+  for (const k of Object.keys(state.exploreAnns)) {
+    if (+k >= ply) delete state.exploreAnns[k];
+  }
+}
+
+/** True if sans[0..ply-1] still match the original reviewed game. */
+function isMainLinePly(ply) {
+  if (!ply || !state.mainLineSans?.length) return !state.mainLineSans?.length;
+  if (ply > state.mainLineSans.length) return false;
+  for (let i = 0; i < ply; i++) {
+    if (state.sans[i] !== state.mainLineSans[i]) return false;
+  }
+  return true;
+}
+
 function annotationAtPly(ply) {
   if (!ply) return null;
+  // Off-main-line: only use live explore classifications (never original game flags).
+  if (!isMainLinePly(ply)) {
+    const ex = state.exploreAnns?.[ply];
+    return ex && ANN_GLYPH[ex.severity] ? ex : null;
+  }
   for (const f of (state.moveFlags || [])) {
     if (f.ply === ply && ANN_GLYPH[f.severity]) return f;
   }
   return null;
+}
+
+let exploreAnnotateToken = 0;
+
+async function scheduleExploreAnnotate(ply, fenBefore, san) {
+  if (!ply || !fenBefore || !san) return;
+  const token = ++exploreAnnotateToken;
+  try {
+    const data = await api("/api/annotate-ply", "POST", {
+      fen: fenBefore,
+      san,
+      ply,
+    });
+    if (token !== exploreAnnotateToken) return;
+    if (state.ply !== ply && !isMainLinePly(ply)) {
+      // Still accept if this ply remains on the current line.
+      if (state.sans[ply - 1] !== san) return;
+    }
+    if (data.annotation && ANN_GLYPH[data.annotation.severity]) {
+      state.exploreAnns[ply] = data.annotation;
+    } else {
+      delete state.exploreAnns[ply];
+    }
+    if (state.ply === ply) refreshBoard();
+    else if (state.gameView) renderGameMoveList();
+  } catch (e) {
+    if (!handleProGateError(e)) {
+      /* explore annotate is best-effort */
+    }
+  }
 }
 
 function renderBoard(fen, orientation, hlSquares, hlSeverity) {
@@ -2538,6 +2666,10 @@ async function requestGameAnnotations(sanList, token) {
     }
   } catch (e) {
     if (token !== gameAnnotateToken) return;
+    if (handleProGateError(e)) {
+      setGameAnalyzeStatus("Pro required for full game review.");
+      return;
+    }
     setGameAnalyzeStatus(e.message || "Analysis failed");
   }
 }
@@ -2766,6 +2898,9 @@ function resetGame(title) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = null;
   clearBoardPlayers();
   setGameView(false);
@@ -2992,6 +3127,9 @@ function loadLine(line, openingName) {
   rebuildDerived();
   state.ply = 0;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = line.name || null;
   clearBoardPlayers();
   setGameView(false);
@@ -3023,6 +3161,9 @@ function loadGameReplay(g) {
   game = gm;
   rebuildDerived();
   state.ply = 0;
+  state.mainLineSans = sans.slice();
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.moveFlags = g._flags || [];
   state.lastOpeningName = g.variation || null;
   titleEl.textContent = g.variation || "Starting position";
@@ -3495,7 +3636,11 @@ function appendGamesSection(lines, op) {
       renderPatterns(pats);
       render(activeFilter);
     } catch (e) {
-      scanStatus.textContent = e.message || "Scan failed";
+      if (handleProGateError(e)) {
+        scanStatus.textContent = "Pro required to scan for opening mistakes.";
+      } else {
+        scanStatus.textContent = e.message || "Scan failed";
+      }
     } finally {
       scanBtn.disabled = false;
     }
@@ -3919,6 +4064,22 @@ const userMenu = document.getElementById("user-menu");
 const profileMsg = document.getElementById("profile-msg");
 const profilePwMsg = document.getElementById("profile-pw-msg");
 
+function isProUser() {
+  // When billing isn't configured, server reports is_pro=true for everyone logged in
+  // and guests still hit 402 only if billing is on — treat missing user as free.
+  if (currentUser) return !!currentUser.is_pro;
+  return false;
+}
+
+function syncProChips() {
+  // Light Pro chip for Free users when Stripe billing is live.
+  const show = !!(currentUser?.billing_enabled && !currentUser.is_pro);
+  const practiceChip = document.getElementById("practice-pro-chip");
+  const slipChip = document.getElementById("slipups-pro-chip");
+  if (practiceChip) practiceChip.hidden = !show;
+  if (slipChip) slipChip.hidden = !show;
+}
+
 function setUser(user) {
   currentUser = user;
   const loggedIn = !!user;
@@ -3934,6 +4095,7 @@ function setUser(user) {
     closeProfile();
     loadRepertoireFromLocal();
   }
+  syncProChips();
 }
 
 function fillProfileForm(user) {
@@ -3948,6 +4110,18 @@ function fillProfileForm(user) {
     `<span class="profile-pill ${li ? "ok" : "miss"}">lichess: ${li || "not linked"}</span>`;
   const pwCard = document.getElementById("profile-password-card");
   if (pwCard) pwCard.style.display = user?.has_password ? "" : "none";
+
+  const badge = document.getElementById("profile-plan-badge");
+  const upBtn = document.getElementById("profile-upgrade-btn");
+  const billBtn = document.getElementById("profile-billing-btn");
+  const pro = !!user?.is_pro;
+  const billingOn = !!user?.billing_enabled;
+  if (badge) {
+    badge.textContent = pro ? "Pro" : "Free";
+    badge.classList.toggle("pro", pro);
+  }
+  if (upBtn) upBtn.style.display = billingOn && !pro ? "" : "none";
+  if (billBtn) billBtn.style.display = billingOn && pro ? "" : "none";
 }
 
 function openProfile() {
@@ -3975,8 +4149,112 @@ async function api(path, method, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await readJson(resp);
-  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const err = new Error(data.error || `HTTP ${resp.status}`);
+    err.status = resp.status;
+    err.code = data.code || null;
+    throw err;
+  }
   return data;
+}
+
+/* ---------- Pro / Stripe upgrade ---------- */
+
+const upgradeModal = document.getElementById("upgrade-modal");
+const upgradeMsg = document.getElementById("upgrade-msg");
+
+function openUpgradeModal() {
+  if (!currentUser) {
+    authModal.classList.add("open");
+    return;
+  }
+  setMsg(upgradeMsg, "");
+  upgradeModal?.classList.add("open");
+}
+
+function closeUpgradeModal() {
+  upgradeModal?.classList.remove("open");
+  setMsg(upgradeMsg, "");
+}
+
+/** If API error needs login/Pro, open the right modal. Returns true if handled. */
+function handleProGateError(e) {
+  if (e?.code === "login_required" || e?.status === 401) {
+    authModal.classList.add("open");
+    return true;
+  }
+  if (e?.code === "pro_required" || e?.status === 402) {
+    openUpgradeModal();
+    return true;
+  }
+  return false;
+}
+
+async function startCheckout(interval) {
+  if (!currentUser) {
+    authModal.classList.add("open");
+    return;
+  }
+  setMsg(upgradeMsg, "Redirecting to checkout\u2026");
+  try {
+    const data = await api("/api/billing/checkout", "POST", { interval });
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    setMsg(upgradeMsg, "No checkout URL returned.", "error");
+  } catch (e) {
+    setMsg(upgradeMsg, e.message || "Checkout failed", "error");
+  }
+}
+
+async function openBillingPortal() {
+  setMsg(profileMsg, "Opening billing portal\u2026");
+  try {
+    const data = await api("/api/billing/portal", "POST", {});
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    setMsg(profileMsg, "No portal URL returned.", "error");
+  } catch (e) {
+    setMsg(profileMsg, e.message || "Could not open portal", "error");
+  }
+}
+
+function initBillingUi() {
+  document.getElementById("upgrade-cancel-btn")?.addEventListener("click", closeUpgradeModal);
+  document.getElementById("upgrade-month-btn")?.addEventListener("click", () => startCheckout("month"));
+  document.getElementById("upgrade-year-btn")?.addEventListener("click", () => startCheckout("year"));
+  document.getElementById("profile-upgrade-btn")?.addEventListener("click", openUpgradeModal);
+  document.getElementById("profile-billing-btn")?.addEventListener("click", openBillingPortal);
+  upgradeModal?.addEventListener("click", e => {
+    if (e.target === upgradeModal) closeUpgradeModal();
+  });
+
+  // Return from Stripe Checkout
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (billing === "success") {
+      params.delete("billing");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+      refreshMeAfterBilling();
+    } else if (billing === "cancel") {
+      params.delete("billing");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshMeAfterBilling() {
+  try {
+    const user = await api("/api/me", "GET");
+    setUser(user);
+    closeUpgradeModal();
+  } catch (e) { /* ignore */ }
 }
 
 function setMsg(el, text, cls) {
@@ -5156,7 +5434,11 @@ async function refreshRepSlipups() {
     }
     renderPracticeList();
   } catch (e) {
-    setSlipupsStatus(e.message || "Could not scan for slip-ups.");
+    if (handleProGateError(e)) {
+      setSlipupsStatus("Pro required to scan for early-opening slip-ups.");
+    } else {
+      setSlipupsStatus(e.message || "Could not scan for slip-ups.");
+    }
   } finally {
     repSlipupsBusy = false;
   }
@@ -5271,6 +5553,9 @@ function loadRepLine(entry, enterPractice) {
   rebuildDerived();
   state.ply = state.sans.length;
   state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
   state.lastOpeningName = entry.name;
   state.orientation = state.repColor;
   if (enterPractice) {
@@ -5291,6 +5576,10 @@ function stopPractice() {
 }
 
 function startPractice(entry) {
+  if (currentUser?.billing_enabled && !currentUser.is_pro) {
+    openUpgradeModal();
+    return;
+  }
   state.practiceElo = +document.getElementById("rep-difficulty").value || 1800;
   loadRepLine(entry, true);
   const st = document.getElementById("rep-practice-status");
@@ -5406,7 +5695,13 @@ async function runPracticeReply() {
     document.getElementById("rep-practice-status").textContent =
       `Stockfish played ${data.san}. Your move.`;
   } catch (e) {
-    document.getElementById("rep-practice-status").textContent = e.message;
+    if (handleProGateError(e)) {
+      stopPractice();
+      document.getElementById("rep-practice-status").textContent =
+        "Pro required for Practice vs Stockfish.";
+    } else {
+      document.getElementById("rep-practice-status").textContent = e.message;
+    }
   } finally {
     practiceBusy = false;
   }
@@ -5468,7 +5763,7 @@ document.querySelectorAll("#practice-color-modal .color-choice-row button").forE
 /* ---------- init ---------- */
 
 const BOARD_THEME_LS = "boardTheme";
-const BOARD_THEMES = ["green", "blue", "pink", "grey"];
+const BOARD_THEMES = ["blue", "green", "pink", "grey"];
 
 function syncThemeSwatches(theme) {
   document.querySelectorAll("#theme-swatches .theme-swatch").forEach(btn => {
@@ -5479,7 +5774,7 @@ function syncThemeSwatches(theme) {
 }
 
 function applyBoardTheme(theme, { persist = true } = {}) {
-  const t = BOARD_THEMES.includes(theme) ? theme : "green";
+  const t = BOARD_THEMES.includes(theme) ? theme : "blue";
   document.documentElement.setAttribute("data-board-theme", t);
   if (persist) {
     try { localStorage.setItem(BOARD_THEME_LS, t); } catch (e) { /* ignore */ }
@@ -5491,7 +5786,7 @@ function applyBoardTheme(theme, { persist = true } = {}) {
 }
 
 function initBoardTheme() {
-  let saved = "green";
+  let saved = "blue";
   try {
     const v = localStorage.getItem(BOARD_THEME_LS);
     if (BOARD_THEMES.includes(v)) saved = v;
@@ -5508,11 +5803,13 @@ function initBoardTheme() {
 }
 
 initBoardTheme();
+initBillingUi();
 initRecentUsernames();
 loadRepertoireFromLocal();
 rebuildDerived();
 refreshBoard();
 updateEditTurnBtns();
+syncProChips();
 requestAnimationFrame(syncSidebarToBoard);
 </script>
 </body>

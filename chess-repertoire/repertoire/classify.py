@@ -322,6 +322,112 @@ def _analyse_multipv(
     return out
 
 
+def annotate_ply(
+    engine: chess.engine.SimpleEngine,
+    board: chess.Board,
+    san: str,
+    *,
+    ply: int,
+    depth: int = ANNOTATE_DEPTH,
+    eval_cache: dict | None = None,
+    mark_quiet_best: bool = False,
+) -> MoveAnnotation | None:
+    """Classify one move on `board` (position before the move). Pushes the move.
+
+    When mark_quiet_best is True (exploratory analysis), engine-best moves that
+    would otherwise get no badge are marked severity "best".
+    """
+    if eval_cache is None:
+        eval_cache = {}
+    limit = chess.engine.Limit(depth=depth)
+    san = str(san)
+    mover = "white" if board.turn == chess.WHITE else "black"
+    before_fen = board.fen()
+
+    cache_key = f"mpv2|{depth}|{before_fen}"
+    if cache_key in eval_cache:
+        lines = eval_cache[cache_key]
+    else:
+        lines = _analyse_multipv(engine, board, limit, multipv=2)
+        eval_cache[cache_key] = lines
+
+    if not lines or lines[0]["cp"] is None:
+        try:
+            board.push_san(san)
+        except ValueError:
+            return None
+        return None
+
+    before_white = lines[0]["cp"]
+    best_san = lines[0].get("best_san")
+    before_mover = _mover_cp(before_white, mover)
+
+    second_best_gap = 0
+    if len(lines) > 1 and lines[1]["cp"] is not None:
+        second_mover = _mover_cp(lines[1]["cp"], mover)
+        second_best_gap = before_mover - second_mover
+
+    try:
+        move = board.parse_san(san)
+    except ValueError:
+        return None
+
+    sacrifice = is_material_sacrifice(board, move)
+    try:
+        board.push(move)
+    except ValueError:
+        return None
+
+    if board.is_checkmate():
+        return MoveAnnotation(
+            ply=ply,
+            san=san,
+            severity="brilliant" if sacrifice else "great",
+            loss_cp=0,
+            best_san=best_san,
+            color=mover,
+        )
+
+    after_fen = board.fen()
+    after_key = f"mpv1|{depth}|{after_fen}"
+    if after_key in eval_cache:
+        after_lines = eval_cache[after_key]
+    else:
+        after_lines = _analyse_multipv(engine, board, limit, multipv=1)
+        eval_cache[after_key] = after_lines
+
+    if not after_lines or after_lines[0]["cp"] is None:
+        return None
+
+    after_white = after_lines[0]["cp"]
+    after_mover = _mover_cp(after_white, mover)
+    loss_cp = int(before_mover - after_mover)
+    played_is_best = (
+        (best_san is not None and san == best_san)
+        or loss_cp <= BEST_TOLERANCE_CP
+    )
+
+    severity = classify_annotation(
+        loss_cp=loss_cp,
+        played_is_best=played_is_best,
+        is_sacrifice=sacrifice,
+        before_cp_mover=before_mover,
+        second_best_gap_cp=int(second_best_gap),
+    )
+    if not severity and mark_quiet_best and played_is_best:
+        severity = "best"
+    if not severity:
+        return None
+    return MoveAnnotation(
+        ply=ply,
+        san=san,
+        severity=severity,
+        loss_cp=max(0, loss_cp),
+        best_san=best_san,
+        color=mover,
+    )
+
+
 def annotate_game(
     engine: chess.engine.SimpleEngine,
     san_moves: list[str],
@@ -335,94 +441,25 @@ def annotate_game(
         eval_cache = {}
     board = chess.Board()
     annotations: list[MoveAnnotation] = []
-    limit = chess.engine.Limit(depth=depth)
     max_ply = min(len(san_moves), max_plies)
 
     for ply_idx in range(max_ply):
         san = str(san_moves[ply_idx])
-        mover = "white" if board.turn == chess.WHITE else "black"
-        before_fen = board.fen()
-
-        cache_key = f"mpv2|{depth}|{before_fen}"
-        if cache_key in eval_cache:
-            lines = eval_cache[cache_key]
-        else:
-            lines = _analyse_multipv(engine, board, limit, multipv=2)
-            eval_cache[cache_key] = lines
-
-        if not lines or lines[0]["cp"] is None:
-            try:
-                board.push_san(san)
-            except ValueError:
+        before_len = len(board.move_stack)
+        ann = annotate_ply(
+            engine,
+            board,
+            san,
+            ply=ply_idx + 1,
+            depth=depth,
+            eval_cache=eval_cache,
+        )
+        if ann:
+            annotations.append(ann)
+            if board.is_checkmate():
                 break
-            continue
-
-        before_white = lines[0]["cp"]
-        best_san = lines[0].get("best_san")
-        before_mover = _mover_cp(before_white, mover)
-
-        second_best_gap = 0
-        if len(lines) > 1 and lines[1]["cp"] is not None:
-            second_mover = _mover_cp(lines[1]["cp"], mover)
-            second_best_gap = before_mover - second_mover
-
-        try:
-            move = board.parse_san(san)
-        except ValueError:
+        elif len(board.move_stack) == before_len:
+            # Illegal / failed push — stop.
             break
-
-        sacrifice = is_material_sacrifice(board, move)
-        try:
-            board.push(move)
-        except ValueError:
-            break
-
-        # Delivering mate is always notable and never a blunder.
-        if board.is_checkmate():
-            annotations.append(MoveAnnotation(
-                ply=ply_idx + 1,
-                san=san,
-                severity="brilliant" if sacrifice else "great",
-                loss_cp=0,
-                best_san=best_san,
-                color=mover,
-            ))
-            break
-
-        after_fen = board.fen()
-        after_key = f"mpv1|{depth}|{after_fen}"
-        if after_key in eval_cache:
-            after_lines = eval_cache[after_key]
-        else:
-            after_lines = _analyse_multipv(engine, board, limit, multipv=1)
-            eval_cache[after_key] = after_lines
-
-        if not after_lines or after_lines[0]["cp"] is None:
-            continue
-
-        after_white = after_lines[0]["cp"]
-        after_mover = _mover_cp(after_white, mover)
-        loss_cp = int(before_mover - after_mover)
-        played_is_best = (
-            (best_san is not None and san == best_san)
-            or loss_cp <= BEST_TOLERANCE_CP
-        )
-
-        severity = classify_annotation(
-            loss_cp=loss_cp,
-            played_is_best=played_is_best,
-            is_sacrifice=sacrifice,
-            before_cp_mover=before_mover,
-            second_best_gap_cp=int(second_best_gap),
-        )
-        if severity:
-            annotations.append(MoveAnnotation(
-                ply=ply_idx + 1,
-                san=san,
-                severity=severity,
-                loss_cp=max(0, loss_cp),
-                best_san=best_san,
-                color=mover,
-            ))
 
     return annotations
