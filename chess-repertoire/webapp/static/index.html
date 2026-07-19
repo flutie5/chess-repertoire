@@ -975,6 +975,42 @@
   .plan-badge.pro {
     color: var(--green); border-color: var(--green-soft-4);
   }
+  .analytics-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+    margin-top: 4px;
+  }
+  .analytics-stats .analytics-num {
+    display: block;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--text-primary);
+  }
+  .analytics-stats .analytics-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .analytics-search-list {
+    max-height: 240px; overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    font-size: 12px;
+  }
+  .analytics-search-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .analytics-search-row:last-child { border-bottom: 0; }
+  .analytics-search-row .q { font-weight: 700; color: var(--text-primary); word-break: break-all; }
+  .analytics-search-row .meta { color: var(--text-muted); white-space: nowrap; }
   .modal label {
     display: flex; flex-direction: column; gap: 4px;
     font-size: 13px; color: var(--text-secondary);
@@ -1413,7 +1449,7 @@
   </div>
   <div class="auth-area">
     <button class="primary" id="analyze-me-btn" style="display:none">Analyze my games</button>
-    <button class="primary" id="my-repertoire-btn" type="button" title="Build and practice your openings">My Repertoire</button>
+    <button class="primary" id="my-repertoire-btn" type="button" title="Build and practice your openings (Pro — 3-day free trial)">My Repertoire</button>
     <button id="auth-open-btn" type="button">Log in / Sign up</button>
     <button id="user-menu-btn" style="display:none"></button>
     <div id="user-menu">
@@ -1438,18 +1474,19 @@
 
 <div class="modal-overlay" id="upgrade-modal" role="dialog" aria-labelledby="upgrade-title" aria-modal="true">
   <div class="modal">
-    <h2 id="upgrade-title">Unlock Pro</h2>
+    <h2 id="upgrade-title">Unlock My Repertoire</h2>
     <p class="hint" style="margin:0;font-size:13px;color:var(--text-muted)">
-      Game Review, Recent Slip-ups, and Practice vs Stockfish.
+      Build your openings, practice vs Stockfish, and track slip-ups.
+      Start with a <strong>3-day free trial</strong> — card required, cancel anytime.
     </p>
     <div class="upgrade-prices">
       <button type="button" id="upgrade-month-btn" data-interval="month">
         <span class="price">$6 / month</span>
-        <span class="hint">Cancel anytime</span>
+        <span class="hint">3-day free trial, then $6/mo</span>
       </button>
       <button type="button" id="upgrade-year-btn" class="featured" data-interval="year">
         <span class="price">$40 / year</span>
-        <span class="hint">Save ~$32 vs monthly</span>
+        <span class="hint">3-day free trial, then $40/yr</span>
       </button>
     </div>
     <div class="form-msg" id="upgrade-msg"></div>
@@ -1530,6 +1567,21 @@
       <button class="primary" id="profile-save-btn">Save profile</button>
       <button class="ghost" id="profile-analyze-btn">Analyze my games</button>
     </div>
+  </div>
+
+  <div class="profile-card" id="profile-analytics-card" hidden>
+    <h2>Site visits</h2>
+    <p class="hint">Admin only. Sessions ≈ unique browsers per day. Search log starts after deploy (no history before that).</p>
+    <div class="analytics-stats" id="profile-analytics-stats">
+      <div><span class="analytics-num" id="analytics-today-sessions">—</span><span class="analytics-label">sessions today</span></div>
+      <div><span class="analytics-num" id="analytics-today-views">—</span><span class="analytics-label">views today</span></div>
+      <div><span class="analytics-num" id="analytics-all-sessions">—</span><span class="analytics-label">sessions all-time</span></div>
+      <div><span class="analytics-num" id="analytics-all-views">—</span><span class="analytics-label">views all-time</span></div>
+    </div>
+    <h3 style="margin:16px 0 6px;font-size:14px">Search bar analyzes</h3>
+    <p class="hint" style="margin:0 0 8px">Every Analyze lookup (username or Analyze my games). Latest 200.</p>
+    <div id="analytics-search-list" class="analytics-search-list"></div>
+    <div class="form-msg" id="analytics-msg"></div>
   </div>
 
   <div class="profile-card" id="profile-theme-card">
@@ -4207,13 +4259,19 @@ function fillProfileForm(user) {
   const upBtn = document.getElementById("profile-upgrade-btn");
   const billBtn = document.getElementById("profile-billing-btn");
   const pro = !!user?.is_pro;
+  const trial = !!user?.is_trialing;
   const billingOn = !!user?.billing_enabled;
   if (badge) {
-    badge.textContent = pro ? "Pro" : "Free";
-    badge.classList.toggle("pro", pro);
+    badge.textContent = trial ? "Trial" : (pro ? "Pro" : "Free");
+    badge.classList.toggle("pro", pro || trial);
   }
   if (upBtn) upBtn.style.display = billingOn && !pro ? "" : "none";
   if (billBtn) billBtn.style.display = billingOn && pro ? "" : "none";
+
+  const analyticsCard = document.getElementById("profile-analytics-card");
+  if (analyticsCard) {
+    analyticsCard.hidden = !user?.can_view_analytics;
+  }
 }
 
 function openProfile() {
@@ -4225,6 +4283,7 @@ function openProfile() {
   fillProfileForm(currentUser);
   setMsg(profileMsg, "");
   setMsg(profilePwMsg, "");
+  if (currentUser.can_view_analytics) loadAnalyticsSummary();
   document.body.classList.add("profile-open");
   userMenu.classList.remove("open");
 }
@@ -4478,20 +4537,27 @@ function waitForGoogleSdk(timeoutMs = 4000) {
   });
 }
 
+function initGoogleIdentity() {
+  if (!googleClientId || !window.google?.accounts?.id) return false;
+  window.google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: true,
+    context: "signin",
+    // Chrome third-party cookie changes: FedCM avoids the stuck gsi/select tab.
+    use_fedcm_for_prompt: true,
+    itp_support: true,
+  });
+  googleBtnRendered = true;
+  return true;
+}
+
 function renderGoogleButton() {
   const host = document.getElementById("google-signin-btn");
   const wrap = document.getElementById("auth-google-wrap");
   if (!host || !googleClientId || !window.google?.accounts?.id) return false;
-  if (!googleBtnRendered) {
-    window.google.accounts.id.initialize({
-      client_id: googleClientId,
-      callback: handleGoogleCredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-      context: "signin",
-    });
-    googleBtnRendered = true;
-  }
+  if (!googleBtnRendered) initGoogleIdentity();
   host.innerHTML = "";
   const width = Math.max(280, Math.min(400, Math.floor((wrap?.clientWidth || host.parentElement?.clientWidth || 320))));
   window.google.accounts.id.renderButton(host, {
@@ -4523,6 +4589,7 @@ async function prepareGoogleSignIn() {
     return false;
   }
   setMsg(authGoogleMsg, "");
+  googleBtnRendered = false; // re-init with FedCM each open
   return renderGoogleButton();
 }
 
@@ -4530,7 +4597,20 @@ async function startGoogleSignIn() {
   setMsg(authGoogleMsg, "Loading Google sign-in\u2026");
   const ok = await prepareGoogleSignIn();
   if (!ok) return;
-  setMsg(authGoogleMsg, "Use the Google button above to choose an account.");
+  setMsg(authGoogleMsg, "Choose your Google account in the prompt (stay on this tab).");
+  try {
+    window.google.accounts.id.prompt(notification => {
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        setMsg(
+          authGoogleMsg,
+          "Google prompt was blocked. Click Continue with Google above, allow sign-in popups for this site, or use email/password.",
+          "error"
+        );
+      }
+    });
+  } catch (e) {
+    setMsg(authGoogleMsg, "Use the Google button above to choose an account.");
+  }
 }
 
 async function openAuthModal() {
@@ -4609,7 +4689,96 @@ authModal.addEventListener("click", e => {
   } catch (e) {
     setUser(null);
   }
+  // After session restore so admin logins are not counted as visits.
+  trackVisit();
 })();
+
+/* ---------- Site visit analytics (self-hosted) ---------- */
+
+function analyticsSessionId() {
+  try {
+    let sid = sessionStorage.getItem("oe_sid");
+    if (!sid) {
+      sid = (crypto.randomUUID && crypto.randomUUID()) ||
+        ("s" + Math.random().toString(36).slice(2) + Date.now().toString(36));
+      sessionStorage.setItem("oe_sid", sid);
+    }
+    return sid;
+  } catch (e) {
+    return "anon" + Date.now().toString(36);
+  }
+}
+
+async function trackVisit() {
+  try {
+    // Don't count the admin account — only other visitors matter.
+    if (currentUser?.can_view_analytics) return;
+    await ensureApiBase();
+    const path = location.pathname || "/";
+    const flag = "oe_hit_" + path;
+    if (sessionStorage.getItem(flag)) return;
+    sessionStorage.setItem(flag, "1");
+    fetch(apiUrl("/api/analytics/hit"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: analyticsSessionId(),
+        path,
+      }),
+      credentials: "include",
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
+async function loadAnalyticsSummary() {
+  const msg = document.getElementById("analytics-msg");
+  const list = document.getElementById("analytics-search-list");
+  setMsg(msg, "");
+  try {
+    const data = await api("/api/analytics/summary", "GET");
+    const set = (id, n) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(n ?? 0);
+    };
+    set("analytics-today-sessions", data.today?.sessions);
+    set("analytics-today-views", data.today?.pageviews);
+    set("analytics-all-sessions", data.all_time?.sessions);
+    set("analytics-all-views", data.all_time?.pageviews);
+
+    if (list) {
+      const rows = data.searches?.recent || [];
+      const total = data.searches?.total ?? rows.length;
+      if (!rows.length) {
+        list.innerHTML = `<div class="analytics-search-row"><span class="meta">No searches logged yet (${total} total).</span></div>`;
+      } else {
+        list.innerHTML = rows.map(r => {
+          const when = r.created_at
+            ? new Date(r.created_at * 1000).toLocaleString()
+            : "";
+          const kind = r.kind === "me" ? "my games" : (r.source || "search");
+          return `<div class="analytics-search-row">` +
+            `<span class="q">${escapeHtml(r.query || "")}</span>` +
+            `<span class="meta">${escapeHtml(kind)} · ${escapeHtml(when)}</span>` +
+            `</div>`;
+        }).join("") +
+          (total > rows.length
+            ? `<div class="analytics-search-row"><span class="meta">Showing ${rows.length} of ${total}</span></div>`
+            : "");
+      }
+    }
+  } catch (e) {
+    setMsg(msg, e.message || "Could not load stats", "error");
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 /* ---------- piece interaction (click-click + drag-and-drop) ---------- */
 
@@ -5852,6 +6021,16 @@ async function runPracticeReply() {
 }
 
 async function openRepertoire() {
+  // My Repertoire is the Pro product (with 3-day trial via Checkout).
+  if (!currentUser) {
+    setMsg(authMsg, "Sign in to use My Repertoire.", "error");
+    authModal.classList.add("open");
+    return;
+  }
+  if (currentUser.billing_enabled && !currentUser.is_pro) {
+    openUpgradeModal();
+    return;
+  }
   closeProfile();
   if (state.editMode) setEditMode(false);
   stopPractice();

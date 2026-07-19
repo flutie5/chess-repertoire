@@ -21,7 +21,11 @@ POST /api/annotate-game runs a full-game Stockfish review and returns
 chess.com-style move annotations (blunder/mistake/great/best/brilliant).
 
 Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
-/api/billing/webhook. Pro gates annotate-*, scan-blunders, practice-move.
+/api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync and
+practice-move. Game review (annotate-*) stays free.
+
+Analytics (free, self-hosted): POST /api/analytics/hit,
+GET /api/analytics/summary (logged-in; optional ANALYTICS_ADMIN_EMAIL).
 """
 
 from __future__ import annotations
@@ -251,6 +255,40 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analytics_daily (
+                day TEXT PRIMARY KEY,
+                pageviews INTEGER NOT NULL DEFAULT 0,
+                sessions INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analytics_sessions (
+                day TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                PRIMARY KEY (day, session_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analytics_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                query TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'chesscom',
+                kind TEXT NOT NULL DEFAULT 'username',
+                user_id INTEGER
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_searches_created "
+            "ON analytics_searches(created_at DESC)"
+        )
         _migrate_users(conn)
 
 
@@ -283,6 +321,7 @@ def _migrate_users(conn: sqlite3.Connection) -> None:
 _init_db()
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+ANALYTICS_ADMIN_EMAIL = os.environ.get("ANALYTICS_ADMIN_EMAIL", "").strip().lower()
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -360,6 +399,41 @@ def _user_col(user: sqlite3.Row, name: str, default=None):
     return user[name] if name in keys else default
 
 
+TRIAL_DAYS = 3
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_BOT_UA_RE = re.compile(
+    r"(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|monitoring)",
+    re.I,
+)
+
+
+def _can_view_analytics(user: sqlite3.Row | None) -> bool:
+    """Site stats: only the configured admin email. Hidden from everyone else."""
+    if user is None or not ANALYTICS_ADMIN_EMAIL:
+        return False
+    return (user["email"] or "").strip().lower() == ANALYTICS_ADMIN_EMAIL
+
+
+def _is_analytics_admin_user(user: sqlite3.Row | None) -> bool:
+    """True when this account should be excluded from visit/search stats."""
+    return _can_view_analytics(user)
+
+
+def _is_analytics_admin_user_id(user_id: int | None) -> bool:
+    if user_id is None or not ANALYTICS_ADMIN_EMAIL:
+        return False
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT email FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    return (row["email"] or "").strip().lower() == ANALYTICS_ADMIN_EMAIL
+
+
 def _is_pro(user: sqlite3.Row | None) -> bool:
     if user is None:
         return False
@@ -406,6 +480,8 @@ def _user_payload(user: sqlite3.Row) -> dict:
     plan = _user_col(user, "plan") or "free"
     plan_interval = _user_col(user, "plan_interval")
     plan_status = _user_col(user, "plan_status")
+    plan_expires_at = _user_col(user, "plan_expires_at")
+    is_pro = _is_pro(user) or not _billing_configured()
     return {
         "email": user["email"],
         "display_name": display or "",
@@ -416,8 +492,12 @@ def _user_payload(user: sqlite3.Row) -> dict:
         "plan": plan,
         "plan_interval": plan_interval,
         "plan_status": plan_status,
-        "is_pro": _is_pro(user) or not _billing_configured(),
+        "plan_expires_at": plan_expires_at,
+        "is_pro": is_pro,
+        "is_trialing": (plan_status or "").lower() == "trialing" and is_pro,
         "billing_enabled": _billing_configured(),
+        "trial_days": TRIAL_DAYS,
+        "can_view_analytics": _can_view_analytics(user),
     }
 
 # In-memory cache of parsed games + move lists per (username, months).
@@ -811,10 +891,8 @@ def scan_blunders():
       player_only?: bool (default true — only flag the player whose color is set)
     }
     Caps the batch to keep Render-friendly response times.
+    Free on Analyze; My Repertoire UI is Pro-gated separately.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     games_in = data.get("games")
     if not isinstance(games_in, list) or not games_in:
@@ -895,10 +973,8 @@ def annotate_game():
     """Full-game Stockfish review with chess.com-style move badges.
 
     Body: { san: ["e4", "c5", ...], depth?: int }
+    Free for everyone — Pro gates My Repertoire instead.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     san = data.get("san") or []
     if not isinstance(san, list) or not san:
@@ -949,10 +1025,8 @@ def annotate_ply():
     """Classify a single exploratory move (position before + SAN).
 
     Body: { fen: "...", san: "h4", ply?: int, depth?: int }
+    Free for everyone — Pro gates My Repertoire instead.
     """
-    _user, err = _require_pro()
-    if err:
-        return err
     data = _json_body()
     fen = (data.get("fen") or "").strip()
     san = (data.get("san") or "").strip()
@@ -1042,6 +1116,7 @@ def _subscription_as_dict(subscription) -> dict:
             "status": subscription.get("status") or "",
             "customer": subscription.get("customer"),
             "current_period_end": subscription.get("current_period_end"),
+            "trial_end": subscription.get("trial_end"),
             "price_id": price_id,
             "metadata": subscription.get("metadata") or {},
         }
@@ -1066,6 +1141,7 @@ def _subscription_as_dict(subscription) -> dict:
         "status": getattr(subscription, "status", None) or "",
         "customer": customer,
         "current_period_end": getattr(subscription, "current_period_end", None),
+        "trial_end": getattr(subscription, "trial_end", None),
         "price_id": price_id,
         "metadata": meta,
     }
@@ -1087,6 +1163,8 @@ def _apply_subscription_to_user(
     customer = sub.get("customer") or stripe_customer_id
     interval = _interval_for_price(sub.get("price_id"))
     period_end = sub.get("current_period_end")
+    trial_end = sub.get("trial_end")
+    expires = trial_end if status == "trialing" and trial_end else period_end
     plan = "pro" if status in ("active", "trialing", "past_due") else "free"
 
     where = ""
@@ -1117,7 +1195,7 @@ def _apply_subscription_to_user(
             plan,
             interval,
             status,
-            int(period_end) if period_end else None,
+            int(expires) if expires else None,
             *args,
         ),
     )
@@ -1125,7 +1203,10 @@ def _apply_subscription_to_user(
 
 @app.post("/api/billing/checkout")
 def billing_checkout():
-    """Create a Stripe Checkout Session for Pro (month or year)."""
+    """Create a Stripe Checkout Session for Pro (month or year).
+
+    New subscribers get a TRIAL_DAYS free trial (card collected, charged after).
+    """
     if not _billing_configured():
         return jsonify({"error": "Billing is not configured"}), 503
     user, err = _require_login()
@@ -1142,7 +1223,12 @@ def billing_checkout():
 
     base = _app_base_url()
     customer_id = _user_col(user, "stripe_customer_id")
+    # First-time subscribers get a 3-day trial; returning customers do not.
+    offer_trial = not _user_col(user, "stripe_subscription_id")
     try:
+        sub_data = {"metadata": {"user_id": str(user["id"])}}
+        if offer_trial:
+            sub_data["trial_period_days"] = TRIAL_DAYS
         params = {
             "mode": "subscription",
             "line_items": [{"price": price_id, "quantity": 1}],
@@ -1150,9 +1236,7 @@ def billing_checkout():
             "cancel_url": f"{base}/?billing=cancel",
             "client_reference_id": str(user["id"]),
             "metadata": {"user_id": str(user["id"])},
-            "subscription_data": {
-                "metadata": {"user_id": str(user["id"])},
-            },
+            "subscription_data": sub_data,
             "allow_promotion_codes": True,
         }
         email = (user["email"] or "").strip()
@@ -1491,6 +1575,9 @@ def start_report_job():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
+    uid = session.get("user_id")
+    _log_search(username, source=source, kind="username", user_id=uid)
+
     job_id = _start_report_job(
         lambda: _make_username_report(
             username, source, months, time_classes, since_ts, until_ts
@@ -1517,6 +1604,9 @@ def start_report_me_job():
         months, time_classes, since_ts, until_ts = _parse_report_args()
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    label = " + ".join(p for p in (cc_name, li_name) if p) or "me"
+    _log_search(label, source="linked", kind="me", user_id=user["id"])
 
     job_id = _start_report_job(
         lambda: _make_me_report(user, months, time_classes, since_ts, until_ts)
@@ -1552,6 +1642,9 @@ def report():
         months, time_classes, since_ts, until_ts = _parse_report_args()
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    uid = session.get("user_id")
+    _log_search(username, source=source, kind="username", user_id=uid)
 
     games_with_moves = []
     try:
@@ -1589,6 +1682,9 @@ def report_me():
         months, time_classes, since_ts, until_ts = _parse_report_args()
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    label = " + ".join(p for p in (cc_name, li_name) if p) or "me"
+    _log_search(label, source="linked", kind="me", user_id=user["id"])
 
     games_with_moves = []
     sources = []
@@ -1775,6 +1871,145 @@ def logout():
     return jsonify({"ok": True})
 
 
+def _log_search(
+    query: str,
+    *,
+    source: str = "chesscom",
+    kind: str = "username",
+    user_id: int | None = None,
+) -> None:
+    """Best-effort log of Analyze search-bar / me-report lookups."""
+    if _is_analytics_admin_user_id(user_id):
+        return
+    # Also skip when the current session is the admin (even if user_id omitted).
+    if _is_analytics_admin_user(_current_user()):
+        return
+    q = (query or "").strip()[:80]
+    if not q:
+        return
+    src = (source or "chesscom").strip().lower()[:32]
+    k = (kind or "username").strip().lower()[:32]
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO analytics_searches (query, source, kind, user_id) "
+                "VALUES (?, ?, ?, ?)",
+                (q, src, k, user_id),
+            )
+    except Exception as exc:
+        print(f"WARNING: analytics search log failed: {exc}", flush=True)
+
+
+@app.post("/api/analytics/hit")
+def analytics_hit():
+    """Record a pageview + unique session for the UTC day. Public, best-effort."""
+    if _is_analytics_admin_user(_current_user()):
+        return jsonify({"ok": True, "ignored": "admin"}), 200
+
+    ua = request.headers.get("User-Agent") or ""
+    if _BOT_UA_RE.search(ua):
+        return jsonify({"ok": True, "ignored": "bot"}), 200
+
+    data = _json_body()
+    session_id = (data.get("session_id") or "").strip()
+    path = (data.get("path") or "/").strip() or "/"
+    if not _SESSION_ID_RE.match(session_id):
+        return jsonify({"error": "invalid session_id"}), 400
+    if len(path) > 200 or not path.startswith("/"):
+        path = "/"
+
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        with _db() as conn:
+            conn.execute(
+                """
+                INSERT INTO analytics_daily (day, pageviews, sessions)
+                VALUES (?, 1, 0)
+                ON CONFLICT(day) DO UPDATE SET pageviews = pageviews + 1
+                """,
+                (day,),
+            )
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO analytics_sessions (day, session_id) VALUES (?, ?)",
+                (day, session_id),
+            )
+            if cur.rowcount:
+                conn.execute(
+                    "UPDATE analytics_daily SET sessions = sessions + 1 WHERE day = ?",
+                    (day,),
+                )
+    except Exception as exc:
+        print(f"WARNING: analytics hit failed: {exc}", flush=True)
+        return jsonify({"ok": False}), 200
+
+    return jsonify({"ok": True})
+
+
+@app.get("/api/analytics/summary")
+def analytics_summary():
+    """Totals + last 14 days. Visible to logged-in admin (or any user if unset)."""
+    user, err = _require_login()
+    if err:
+        return err
+    if not _can_view_analytics(user):
+        return jsonify({"error": "Forbidden", "code": "analytics_forbidden"}), 403
+
+    with _db() as conn:
+        totals = conn.execute(
+            "SELECT COALESCE(SUM(pageviews), 0) AS pageviews, "
+            "COALESCE(SUM(sessions), 0) AS sessions FROM analytics_daily"
+        ).fetchone()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_row = conn.execute(
+            "SELECT pageviews, sessions FROM analytics_daily WHERE day = ?",
+            (today,),
+        ).fetchone()
+        days = conn.execute(
+            "SELECT day, pageviews, sessions FROM analytics_daily "
+            "ORDER BY day DESC LIMIT 14"
+        ).fetchall()
+        search_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM analytics_searches"
+        ).fetchone()["n"]
+        searches = conn.execute(
+            "SELECT id, created_at, query, source, kind, user_id "
+            "FROM analytics_searches ORDER BY created_at DESC LIMIT 200"
+        ).fetchall()
+
+    return jsonify({
+        "all_time": {
+            "pageviews": int(totals["pageviews"] or 0),
+            "sessions": int(totals["sessions"] or 0),
+        },
+        "today": {
+            "pageviews": int(today_row["pageviews"]) if today_row else 0,
+            "sessions": int(today_row["sessions"]) if today_row else 0,
+        },
+        "days": [
+            {
+                "day": r["day"],
+                "pageviews": int(r["pageviews"]),
+                "sessions": int(r["sessions"]),
+            }
+            for r in days
+        ],
+        "searches": {
+            "total": int(search_total or 0),
+            "recent": [
+                {
+                    "id": int(r["id"]),
+                    "created_at": int(r["created_at"]),
+                    "query": r["query"],
+                    "source": r["source"],
+                    "kind": r["kind"],
+                    "user_id": r["user_id"],
+                }
+                for r in searches
+            ],
+        },
+    })
+
+
 @app.get("/api/me")
 def me():
     user = _current_user()
@@ -1802,17 +2037,17 @@ def _repertoire_payload(user_id: int) -> dict:
 
 @app.get("/api/me/repertoire")
 def get_repertoire():
-    user = _current_user()
-    if user is None:
-        return jsonify({"error": "not logged in"}), 401
+    user, err = _require_pro()
+    if err:
+        return err
     return jsonify(_repertoire_payload(user["id"]))
 
 
 @app.put("/api/me/repertoire")
 def put_repertoire():
-    user = _current_user()
-    if user is None:
-        return jsonify({"error": "not logged in"}), 401
+    user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     items = []
     for color in ("white", "black"):
