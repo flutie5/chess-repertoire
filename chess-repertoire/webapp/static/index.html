@@ -4537,20 +4537,27 @@ function waitForGoogleSdk(timeoutMs = 4000) {
   });
 }
 
+function initGoogleIdentity() {
+  if (!googleClientId || !window.google?.accounts?.id) return false;
+  window.google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: true,
+    context: "signin",
+    // Chrome third-party cookie changes: FedCM avoids the stuck gsi/select tab.
+    use_fedcm_for_prompt: true,
+    itp_support: true,
+  });
+  googleBtnRendered = true;
+  return true;
+}
+
 function renderGoogleButton() {
   const host = document.getElementById("google-signin-btn");
   const wrap = document.getElementById("auth-google-wrap");
   if (!host || !googleClientId || !window.google?.accounts?.id) return false;
-  if (!googleBtnRendered) {
-    window.google.accounts.id.initialize({
-      client_id: googleClientId,
-      callback: handleGoogleCredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-      context: "signin",
-    });
-    googleBtnRendered = true;
-  }
+  if (!googleBtnRendered) initGoogleIdentity();
   host.innerHTML = "";
   const width = Math.max(280, Math.min(400, Math.floor((wrap?.clientWidth || host.parentElement?.clientWidth || 320))));
   window.google.accounts.id.renderButton(host, {
@@ -4582,6 +4589,7 @@ async function prepareGoogleSignIn() {
     return false;
   }
   setMsg(authGoogleMsg, "");
+  googleBtnRendered = false; // re-init with FedCM each open
   return renderGoogleButton();
 }
 
@@ -4589,7 +4597,20 @@ async function startGoogleSignIn() {
   setMsg(authGoogleMsg, "Loading Google sign-in\u2026");
   const ok = await prepareGoogleSignIn();
   if (!ok) return;
-  setMsg(authGoogleMsg, "Use the Google button above to choose an account.");
+  setMsg(authGoogleMsg, "Choose your Google account in the prompt (stay on this tab).");
+  try {
+    window.google.accounts.id.prompt(notification => {
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        setMsg(
+          authGoogleMsg,
+          "Google prompt was blocked. Click Continue with Google above, allow sign-in popups for this site, or use email/password.",
+          "error"
+        );
+      }
+    });
+  } catch (e) {
+    setMsg(authGoogleMsg, "Use the Google button above to choose an account.");
+  }
 }
 
 async function openAuthModal() {
