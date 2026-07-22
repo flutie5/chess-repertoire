@@ -1042,6 +1042,8 @@
   .sort-tabs {
     display: flex; gap: 6px; margin: 0;
   }
+  .sort-tabs[hidden] { display: none !important; }
+  #mobile-insights:not(.has-data) { display: none !important; }
   .sort-tabs button {
     flex: 1; background: var(--bg-card); color: var(--text-secondary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
