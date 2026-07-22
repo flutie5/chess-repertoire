@@ -227,8 +227,34 @@
     .board-panel {
       order: 0;
       width: 100%;
-      --board-px: min(100vw - 56px, 420px);
+      /* Fit an iPhone-width viewport; JS may set the same value on resize */
+      --board-px: min(100vw - 56px, 100dvw - 56px, 360px);
       gap: 8px;
+      max-width: 100%;
+      overflow: hidden;
+      align-items: center;
+    }
+    .board-panel .board-row,
+    .board-panel #line-title,
+    .board-panel .material-tray,
+    .board-panel .player-strip,
+    .board-panel .nav,
+    .board-panel #engine-panel,
+    .board-panel #line-moves,
+    .board-panel .piece-bank,
+    .board-panel .edit-tools {
+      width: min(calc(var(--board-px) + 30px), 100%) !important;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    #board {
+      width: var(--board-px) !important;
+      height: var(--board-px) !important;
+      max-width: calc(100vw - 56px);
+      max-height: calc(100vw - 56px);
+    }
+    #evalbar {
+      height: var(--board-px) !important;
     }
 
     /* Board hidden by default on mobile — insights are the home screen */
@@ -3411,10 +3437,24 @@ const BOARD_PX_MAX = 960;
 const boardPanel = document.querySelector(".board-panel");
 const boardResize = document.getElementById("board-resize");
 
+function mobileBoardPx() {
+  // Leave room for page padding + eval bar so the square fits an iPhone width.
+  const avail = Math.min(window.innerWidth, window.visualViewport?.width || window.innerWidth) - 56;
+  return Math.round(Math.max(220, Math.min(avail, 360)));
+}
+
 function applyBoardPx(px) {
+  if (!boardPanel) return px;
   const mobile = window.matchMedia("(max-width: 720px)").matches;
-  const minPx = mobile ? 260 : BOARD_PX_MIN;
-  const max = Math.min(BOARD_PX_MAX, Math.max(minPx, window.innerWidth - (mobile ? 56 : 48)));
+  if (mobile) {
+    // Ignore desktop-saved board size — always fit the phone viewport.
+    px = mobileBoardPx();
+    boardPanel.style.setProperty("--board-px", px + "px");
+    requestAnimationFrame(syncSidebarToBoard);
+    return px;
+  }
+  const minPx = BOARD_PX_MIN;
+  const max = Math.min(BOARD_PX_MAX, Math.max(minPx, window.innerWidth - 48));
   px = Math.round(Math.min(max, Math.max(minPx, px)));
   boardPanel.style.setProperty("--board-px", px + "px");
   requestAnimationFrame(syncSidebarToBoard);
@@ -3479,6 +3519,7 @@ function initBoardResize() {
 
   let startX = 0, startY = 0, startPx = 560;
   boardResize.addEventListener("pointerdown", e => {
+    if (window.matchMedia("(max-width: 720px)").matches) return;
     e.preventDefault();
     boardResize.setPointerCapture(e.pointerId);
     startX = e.clientX;
@@ -3494,12 +3535,31 @@ function initBoardResize() {
   boardResize.addEventListener("pointerup", e => {
     if (!boardResize.hasPointerCapture(e.pointerId)) return;
     boardResize.releasePointerCapture(e.pointerId);
+    if (window.matchMedia("(max-width: 720px)").matches) return;
     const px = parseFloat(getComputedStyle(boardPanel).getPropertyValue("--board-px")) || 560;
     localStorage.setItem(BOARD_PX_LS, String(Math.round(px)));
   });
 }
 initBoardResize();
-window.addEventListener("resize", () => requestAnimationFrame(syncSidebarToBoard));
+
+function onViewportChange() {
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    applyBoardPx(mobileBoardPx());
+  }
+  requestAnimationFrame(syncSidebarToBoard);
+}
+window.addEventListener("resize", onViewportChange);
+window.visualViewport?.addEventListener("resize", onViewportChange);
+window.matchMedia("(max-width: 720px)").addEventListener("change", ev => {
+  if (ev.matches) {
+    applyBoardPx(mobileBoardPx());
+  } else {
+    const saved = Number(localStorage.getItem(BOARD_PX_LS));
+    applyBoardPx(Number.isFinite(saved) && saved > 0 ? saved : 560);
+    document.body.classList.remove("show-board");
+  }
+  syncBoardToggleBtn();
+});
 if (typeof ResizeObserver !== "undefined" && boardPanel) {
   const boardAlignRo = new ResizeObserver(() => requestAnimationFrame(syncSidebarToBoard));
   boardAlignRo.observe(boardPanel);
@@ -3815,17 +3875,11 @@ if (boardToggleBtn) {
     const next = !document.body.classList.contains("show-board");
     setShowBoard(next);
     if (next && isMobileLayout()) {
+      applyBoardPx(mobileBoardPx());
       document.querySelector(".board-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 }
-MOBILE_MQ.addEventListener?.("change", () => {
-  if (!isMobileLayout()) {
-    // Leaving mobile: always show the board again.
-    document.body.classList.remove("show-board");
-  }
-  syncBoardToggleBtn();
-});
 syncBoardToggleBtn();
 
 /** Black-defense family names (ECO naming) — still White games when you face them. */
