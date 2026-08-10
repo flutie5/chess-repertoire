@@ -61,6 +61,14 @@ Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom
 4. Copy the Client ID into Render as `GOOGLE_CLIENT_ID` (no client secret needed for the GIS ID-token flow)
 5. Redeploy the API so `/api/auth/config` returns the client ID
 
+The app uses Google Identity Services with a session-bound **nonce**, FedCM, and server-side ID-token verification (`email_verified`, audience, issuer, freshness). Email and `google_sub` are stored in SQLite `users`.
+
+Confirm storage locally:
+
+```bash
+python -m pytest tests/test_auth_google.py -v
+```
+
 Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 
 ## 3. Deploy the frontend on Netlify

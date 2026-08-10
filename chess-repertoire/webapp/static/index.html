@@ -107,6 +107,8 @@
   header h1 a:hover span { color: var(--green-hover); }
   header h1 span { color: var(--green); }
   .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  body.logged-in #username,
+  body.logged-in #analyze-btn { display: none; }
   input[type=text] {
     background: var(--bg-input); color: var(--text-primary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
@@ -1028,6 +1030,24 @@
   .modal-actions .primary { flex: 1; }
   .auth-google-wrap {
     display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    position: relative;
+  }
+  .auth-google-wrap.signing-in {
+    opacity: 0.72;
+    pointer-events: none;
+  }
+  .auth-google-wrap.signing-in::after {
+    content: "Signing in\u2026";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-card) 82%, transparent);
+    border-radius: 4px;
   }
   .auth-google-btn {
     width: 100%;
@@ -1555,12 +1575,12 @@
 
   <div class="profile-card">
     <h2>Linked chess accounts</h2>
-    <p class="hint">Save at least one username. You can still paste any username in the header bar without logging in.</p>
+    <p class="hint">Link at least one account, then use <strong>Analyze my games</strong>. Logged-out visitors can still look up any public username in the header.</p>
     <label>chess.com username
-      <input id="profile-chesscom" type="text" placeholder="e.g. flute5" spellcheck="false" autocomplete="off">
+      <input id="profile-chesscom" type="text" placeholder="e.g. Hikaru" spellcheck="false" autocomplete="off">
     </label>
     <label>lichess username
-      <input id="profile-lichess" type="text" placeholder="e.g. flute5" spellcheck="false" autocomplete="off">
+      <input id="profile-lichess" type="text" placeholder="e.g. DrNykterstein" spellcheck="false" autocomplete="off">
     </label>
     <div class="form-msg" id="profile-msg"></div>
     <div class="modal-actions">
@@ -1756,7 +1776,7 @@
     <div id="openings">
       <div class="empty-note">
         <strong>Ready to analyze</strong>
-        <p>Enter a chess.com username above and click <kbd>Analyze</kbd> to see the openings you actually play.</p>
+        <p>Enter a chess.com username above and click <kbd>Analyze</kbd>, or log in and link your accounts to analyze your own games.</p>
       </div>
     </div>
     <div id="game-panel" aria-label="Game moves">
@@ -3500,9 +3520,12 @@ function setOpeningSort(mode) {
 function renderSidebar() {
   openingsEl.innerHTML = "";
   if (!state.report) {
+    const readyHint = currentUser
+      ? "Link your chess.com or lichess username in Profile, then click <kbd>Analyze my games</kbd>."
+      : "Enter a chess.com username above and click <kbd>Analyze</kbd> to see the openings you actually play.";
     openingsEl.innerHTML =
       '<div class="empty-note"><strong>Ready to analyze</strong>' +
-      '<p>Enter a chess.com username above and click <kbd>Analyze</kbd> to see the openings you actually play.</p></div>';
+      '<p>' + readyHint + '</p></div>';
     summaryEl.textContent = "";
     if (openingSortEl) openingSortEl.hidden = true;
     return;
@@ -4197,7 +4220,10 @@ function initRecentUsernames() {
 
 let currentUser = null;   // user payload from /api/me
 let googleClientId = null;
-let googleBtnRendered = false;
+let googleNonce = "";
+let googleIdentityReady = false;
+let googleSignInBusy = false;
+let googleWarmupPromise = null;
 
 const authModal = document.getElementById("auth-modal");
 const authMsg = document.getElementById("auth-msg");
@@ -4227,6 +4253,7 @@ function syncProChips() {
 function setUser(user) {
   currentUser = user;
   const loggedIn = !!user;
+  document.body.classList.toggle("logged-in", loggedIn);
   authOpenBtn.style.display = loggedIn ? "none" : "";
   userMenuBtn.style.display = loggedIn ? "" : "none";
   meBtn.style.display = loggedIn ? "" : "none";
@@ -4240,6 +4267,7 @@ function setUser(user) {
     loadRepertoireFromLocal();
   }
   syncProChips();
+  if (!state.report) renderSidebar();
 }
 
 function fillProfileForm(user) {
@@ -4276,7 +4304,7 @@ function fillProfileForm(user) {
 
 function openProfile() {
   if (!currentUser) {
-    authModal.classList.add("open");
+    openAuthModal();
     return;
   }
   closeRepertoire();
@@ -4361,7 +4389,7 @@ const upgradeMsg = document.getElementById("upgrade-msg");
 
 function openUpgradeModal() {
   if (!currentUser) {
-    authModal.classList.add("open");
+    openAuthModal();
     return;
   }
   setMsg(upgradeMsg, "");
@@ -4376,7 +4404,7 @@ function closeUpgradeModal() {
 /** If API error needs login/Pro, open the right modal. Returns true if handled. */
 function handleProGateError(e) {
   if (e?.code === "login_required" || e?.status === 401) {
-    authModal.classList.add("open");
+    openAuthModal();
     return true;
   }
   if (e?.code === "pro_required" || e?.status === 402) {
@@ -4388,7 +4416,7 @@ function handleProGateError(e) {
 
 async function startCheckout(interval) {
   if (!currentUser) {
-    authModal.classList.add("open");
+    openAuthModal();
     return;
   }
   setMsg(upgradeMsg, "Redirecting to checkout\u2026");
@@ -4404,7 +4432,7 @@ async function startCheckout(interval) {
       closeUpgradeModal();
       setUser(null);
       setMsg(authMsg, "Session expired — sign in again to upgrade.", "error");
-      authModal.classList.add("open");
+      openAuthModal({ keepMessages: true });
       return;
     }
     setMsg(upgradeMsg, e.message || "Checkout failed", "error");
@@ -4493,35 +4521,63 @@ async function logout() {
   userMenu.classList.remove("open");
   try { await api("/api/logout", "POST"); } catch (e) { /* ignore */ }
   setUser(null);
+  googleIdentityReady = false;
+  googleNonce = "";
+  googleWarmupPromise = null;
+  warmGoogleSignIn();
+}
+
+function setGoogleSigningIn(busy) {
+  googleSignInBusy = !!busy;
+  const wrap = document.getElementById("auth-google-wrap");
+  if (wrap) wrap.classList.toggle("signing-in", googleSignInBusy);
 }
 
 async function handleGoogleCredential(response) {
+  if (googleSignInBusy) return;
   const credential = response?.credential;
   if (!credential) {
-    setMsg(authGoogleMsg, "Google sign-in failed.", "error");
+    setMsg(authGoogleMsg, "Google sign-in failed. Please try again.", "error");
     return;
   }
-  setMsg(authGoogleMsg, "\u2026");
+  setGoogleSigningIn(true);
+  setMsg(authGoogleMsg, "Verifying Google account\u2026");
   try {
     const user = await api("/api/auth/google", "POST", { credential });
-    finishLogin(user, false);
+    // Refresh nonce for any later sign-in in this tab.
+    googleNonce = "";
+    googleIdentityReady = false;
+    finishLogin(user, !!user.is_new_account);
   } catch (e) {
     setMsg(authGoogleMsg, e.message, "error");
+    // Mint a fresh nonce so the next Google click is not stuck on a used one.
+    try { await refreshGoogleAuthConfig(); } catch (_) { /* ignore */ }
+    googleIdentityReady = false;
+    await prepareGoogleSignIn();
+  } finally {
+    setGoogleSigningIn(false);
   }
 }
 
+async function refreshGoogleAuthConfig() {
+  const cfg = await api("/api/auth/config", "GET");
+  googleClientId = cfg.google_client_id || "";
+  googleNonce = cfg.nonce || "";
+  return googleClientId;
+}
+
 async function ensureGoogleClientId() {
-  if (googleClientId !== null) return googleClientId;
+  if (googleClientId && googleNonce) return googleClientId;
   try {
-    const cfg = await api("/api/auth/config", "GET");
-    googleClientId = cfg.google_client_id || "";
+    await refreshGoogleAuthConfig();
   } catch (e) {
-    googleClientId = "";
+    googleClientId = googleClientId || "";
+    googleNonce = "";
   }
   return googleClientId;
 }
 
-function waitForGoogleSdk(timeoutMs = 4000) {
+function waitForGoogleSdk(timeoutMs = 8000) {
   if (window.google?.accounts?.id) return Promise.resolve(true);
   return new Promise(resolve => {
     const started = Date.now();
@@ -4533,15 +4589,16 @@ function waitForGoogleSdk(timeoutMs = 4000) {
         clearInterval(wait);
         resolve(false);
       }
-    }, 100);
+    }, 50);
   });
 }
 
 function initGoogleIdentity() {
-  if (!googleClientId || !window.google?.accounts?.id) return false;
+  if (!googleClientId || !googleNonce || !window.google?.accounts?.id) return false;
   window.google.accounts.id.initialize({
     client_id: googleClientId,
     callback: handleGoogleCredential,
+    nonce: googleNonce,
     auto_select: false,
     cancel_on_tap_outside: true,
     context: "signin",
@@ -4549,7 +4606,7 @@ function initGoogleIdentity() {
     use_fedcm_for_prompt: true,
     itp_support: true,
   });
-  googleBtnRendered = true;
+  googleIdentityReady = true;
   return true;
 }
 
@@ -4557,7 +4614,9 @@ function renderGoogleButton() {
   const host = document.getElementById("google-signin-btn");
   const wrap = document.getElementById("auth-google-wrap");
   if (!host || !googleClientId || !window.google?.accounts?.id) return false;
-  if (!googleBtnRendered) initGoogleIdentity();
+  if (!googleIdentityReady || !googleNonce) {
+    if (!initGoogleIdentity()) return false;
+  }
   host.innerHTML = "";
   const width = Math.max(280, Math.min(400, Math.floor((wrap?.clientWidth || host.parentElement?.clientWidth || 320))));
   window.google.accounts.id.renderButton(host, {
@@ -4576,10 +4635,20 @@ async function prepareGoogleSignIn() {
   const btn = document.getElementById("auth-google-btn");
   const wrap = document.getElementById("auth-google-wrap");
   if (wrap) wrap.classList.remove("has-gis");
-  const clientId = await ensureGoogleClientId();
+  // Always refresh nonce before initialize — GIS binds it into the ID token.
+  let clientId = "";
+  try {
+    clientId = await refreshGoogleAuthConfig();
+  } catch (e) {
+    clientId = await ensureGoogleClientId();
+  }
   if (!clientId) {
     setMsg(authGoogleMsg, "Google sign-in is not configured yet.", "error");
     if (btn) btn.disabled = true;
+    return false;
+  }
+  if (!googleNonce) {
+    setMsg(authGoogleMsg, "Could not start a secure Google sign-in session. Refresh and try again.", "error");
     return false;
   }
   if (btn) btn.disabled = false;
@@ -4589,36 +4658,63 @@ async function prepareGoogleSignIn() {
     return false;
   }
   setMsg(authGoogleMsg, "");
-  googleBtnRendered = false; // re-init with FedCM each open
+  googleIdentityReady = false;
   return renderGoogleButton();
 }
 
+/** Prefetch GIS + client ID so the modal button appears immediately. */
+function warmGoogleSignIn() {
+  if (currentUser || googleWarmupPromise) return googleWarmupPromise;
+  googleWarmupPromise = (async () => {
+    try {
+      const clientId = await ensureGoogleClientId();
+      if (!clientId) return false;
+      await waitForGoogleSdk();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })();
+  return googleWarmupPromise;
+}
+
 async function startGoogleSignIn() {
+  // Fallback path when the official GIS button did not render.
   setMsg(authGoogleMsg, "Loading Google sign-in\u2026");
   const ok = await prepareGoogleSignIn();
   if (!ok) return;
-  setMsg(authGoogleMsg, "Choose your Google account in the prompt (stay on this tab).");
+  const wrap = document.getElementById("auth-google-wrap");
+  if (wrap?.classList.contains("has-gis")) {
+    setMsg(authGoogleMsg, "Click Continue with Google above to choose an account.");
+    return;
+  }
+  setMsg(authGoogleMsg, "Choose your Google account (stay on this tab).");
   try {
     window.google.accounts.id.prompt(notification => {
       if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
         setMsg(
           authGoogleMsg,
-          "Google prompt was blocked. Click Continue with Google above, allow sign-in popups for this site, or use email/password.",
+          "Google prompt was blocked. Allow sign-in for this site, then try again — or use email/password.",
           "error"
         );
       }
     });
   } catch (e) {
-    setMsg(authGoogleMsg, "Use the Google button above to choose an account.");
+    setMsg(authGoogleMsg, "Google sign-in is unavailable right now. Use email/password, or refresh the page.", "error");
   }
 }
 
-async function openAuthModal() {
-  setMsg(authMsg, "");
-  setMsg(authGoogleMsg, "");
+async function openAuthModal(opts = {}) {
+  if (!opts.keepMessages) {
+    setMsg(authMsg, "");
+    setMsg(authGoogleMsg, "");
+  }
+  setGoogleSigningIn(false);
   authModal.classList.add("open");
   const btn = document.getElementById("auth-google-btn");
   if (btn) btn.disabled = false;
+  // Warm in parallel so SDK is usually ready when we render.
+  warmGoogleSignIn();
   await prepareGoogleSignIn();
 }
 
@@ -4626,7 +4722,10 @@ authOpenBtn.onclick = () => openAuthModal();
 document.getElementById("auth-google-btn").onclick = () => startGoogleSignIn();
 document.getElementById("auth-login-btn").onclick = () => submitAuth("/api/login");
 document.getElementById("auth-register-btn").onclick = () => submitAuth("/api/register");
-document.getElementById("auth-cancel-btn").onclick = () => authModal.classList.remove("open");
+document.getElementById("auth-cancel-btn").onclick = () => {
+  authModal.classList.remove("open");
+  setGoogleSigningIn(false);
+};
 document.getElementById("auth-password").addEventListener("keydown", e => {
   if (e.key === "Enter") submitAuth("/api/login");
 });
@@ -4689,6 +4788,8 @@ authModal.addEventListener("click", e => {
   } catch (e) {
     setUser(null);
   }
+  // Prefetch Google Identity so Continue with Google is ready when the modal opens.
+  if (!currentUser) warmGoogleSignIn();
   // After session restore so admin logins are not counted as visits.
   trackVisit();
 })();
@@ -6024,7 +6125,7 @@ async function openRepertoire() {
   // My Repertoire is the Pro product (with 3-day trial via Checkout).
   if (!currentUser) {
     setMsg(authMsg, "Sign in to use My Repertoire.", "error");
-    authModal.classList.add("open");
+    openAuthModal({ keepMessages: true });
     return;
   }
   if (currentUser.billing_enabled && !currentUser.is_pro) {
