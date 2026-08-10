@@ -48,3 +48,13 @@ is also a CLI (`chess-repertoire/build_repertoire.py`). See
   the email of a registered account — only that account can see it (and its own
   visits are excluded from the counts). Set it in `chess-repertoire/.env` for
   local dev, or as an env var in Render/Netlify for production.
+- Google Analytics (GA4) support also exists for full traffic/audience reporting
+  (separate from the self-hosted panel above) — see `DEPLOY.md` → "Google
+  Analytics (GA4) setup". The production Measurement ID is baked into
+  `webapp/app.py` as `_DEFAULT_PRODUCTION_GA_MEASUREMENT_ID` and only takes
+  effect when `FLASK_ENV=production`; local dev/tests never load `gtag.js`
+  unless `GA_MEASUREMENT_ID` is explicitly set (e.g. to test against a separate
+  GA4 property). The frontend fetches the effective ID (and `google_client_id`)
+  from `GET /api/auth/config` via the shared `fetchSiteConfig()` cache in
+  `webapp/static/index.html`, then loads `gtag.js` dynamically. Both panels
+  exclude the analytics-admin account's own visits.

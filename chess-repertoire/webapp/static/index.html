@@ -4750,6 +4750,14 @@ function initRecentUsernames() {
 let currentUser = null;   // user payload from /api/me
 let googleClientId = null;
 let googleBtnRendered = false;
+let siteConfigPromise = null;   // shared cache for GET /api/auth/config
+
+function fetchSiteConfig() {
+  if (!siteConfigPromise) {
+    siteConfigPromise = api("/api/auth/config", "GET").catch(() => ({}));
+  }
+  return siteConfigPromise;
+}
 
 const authModal = document.getElementById("auth-modal");
 const authMsg = document.getElementById("auth-msg");
@@ -5064,12 +5072,8 @@ async function handleGoogleCredential(response) {
 
 async function ensureGoogleClientId() {
   if (googleClientId !== null) return googleClientId;
-  try {
-    const cfg = await api("/api/auth/config", "GET");
-    googleClientId = cfg.google_client_id || "";
-  } catch (e) {
-    googleClientId = "";
-  }
+  const cfg = await fetchSiteConfig();
+  googleClientId = cfg.google_client_id || "";
   return googleClientId;
 }
 
@@ -5243,7 +5247,31 @@ authModal.addEventListener("click", e => {
   }
   // After session restore so admin logins are not counted as visits.
   trackVisit();
+  initGoogleAnalytics();
 })();
+
+/* ---------- Google Analytics (GA4, optional) ----------
+ * Off unless the server has GA_MEASUREMENT_ID configured (see .env.example).
+ * Loaded dynamically (rather than a static <head> snippet) so the ID can be
+ * set per-deploy via an env var instead of being hardcoded in committed HTML,
+ * consistent with how GOOGLE_CLIENT_ID/STRIPE_* are handled in this app. */
+
+async function initGoogleAnalytics() {
+  try {
+    if (currentUser?.can_view_analytics) return; // exclude the site admin, like self-hosted stats
+    const cfg = await fetchSiteConfig();
+    const id = (cfg.ga_measurement_id || "").trim();
+    if (!id || window.gtag) return;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag("js", new Date());
+    window.gtag("config", id);
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+    document.head.appendChild(script);
+  } catch (e) { /* best-effort; never block the app on analytics */ }
+}
 
 /* ---------- Site visit analytics (self-hosted) ---------- */
 
