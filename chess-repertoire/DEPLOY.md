@@ -37,7 +37,12 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | Runtime | Python 3 |
 | Build command | `pip install -r requirements.txt && bash scripts/download_stockfish.sh` |
 | Start command | `gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` |
+| Health check | `/api/health` |
 | Root directory | repo root |
+
+**Keep `--workers 1`.** Report/scan jobs are durable in SQLite (`async_jobs`), but the Stockfish engine pool is in-process. Multiple Gunicorn workers would multiply engine processes and fragment rate-limit state. Raise workers only after engines move off the web process.
+
+**Plan:** Free tier sleeps and is fine for demos. For real traffic, upgrade to a paid always-on Render plan before any growth campaign.
 
 **Environment variables (Render)**
 
@@ -46,10 +51,19 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | `FLASK_ENV` | `production` |
 | `SECRET_KEY` | Generate a random 64-char hex string (Render can auto-generate) |
 | `DATA_DIR` | `/data` |
+| `ENGINE_POOL_SIZE` | `2` (concurrent Stockfish processes in this worker) |
+| `JOB_WORKERS` | `2` (thread pool for report/scan jobs) |
+| `ENGINE_THREADS` / `ENGINE_HASH_MB` | `1` / `16` (raise on paid CPU) |
+| `RATE_LIMIT_ENGINE` / `REPORT` / `AUTH` | per-minute caps (defaults 30 / 10 / 20) |
+| `CURRENT_MONTH_CACHE_SECONDS` | `900` — short TTL for chess.com current-month disk cache |
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Web client ID from Google Cloud Console (for Sign in with Google) |
 | `ANALYTICS_ADMIN_EMAIL` | Your login email — unlocks Admin in Profile (account list, set temporary passwords) |
 
-Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom-cache` survive redeploys.
+Add a **persistent disk** mounted at `/data` (1 GB) so `users.db`, job rows, and `.chesscom-cache` survive redeploys.
+
+### API domain / CORS
+
+Prefer the Netlify `/api/*` proxy (same-origin cookies). If the SPA must call Render directly, set `PUBLIC_APP_URL` + `CORS_ORIGINS`, and optionally inject a frontend API base via `window.OPENING_EXPLORER_API` or `<meta name="opening-explorer-api" content="https://…">` (no hardcoded Render host in the SPA).
 
 ### Google Sign-In setup
 
@@ -129,13 +143,16 @@ No Render domain changes are required — only Netlify serves the public site; A
 ## 6. First-deploy verification
 
 - [ ] Render service is **Live** (check Logs for Stockfish install + Gunicorn start)
+- [ ] `https://YOUR-SERVICE.onrender.com/api/health` returns JSON with `ok` / `engine_pool`
 - [ ] `https://YOUR-SERVICE.onrender.com/api/me` returns `401` JSON (not 502)
 - [ ] Netlify site loads at `https://YOUR-SITE.netlify.app`
 - [ ] Register / login works (session cookie on Netlify domain)
 - [ ] Continue with Google works (origins + `GOOGLE_CLIENT_ID` configured)
 - [ ] Analyze a username — report loads (chess.com fetch + cache)
-- [ ] Board eval bar works (Stockfish via `/api/eval`)
+- [ ] Sign in, then board eval bar works (`/api/eval` requires login)
+- [ ] Deep review (annotate / scan) requires Pro when Stripe is configured
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
+- [ ] In-flight report jobs survive a brief restart (rows in `async_jobs`)
 
 ## Local development (unchanged)
 

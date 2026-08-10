@@ -1,5 +1,13 @@
 # Render Blueprint — Opening Explorer API backend
 # https://render.com/docs/blueprint-spec
+#
+# Scale notes (gaps 1–17):
+# - Keep gunicorn --workers 1 while Stockfish runs in-process (engine pool is
+#   per-process). Raise workers only after engines move to a separate service.
+# - Prefer a paid always-on plan for production traffic; free tier sleeps and
+#   cannot absorb concurrent report/engine load.
+# - Tunables: ENGINE_POOL_SIZE, JOB_WORKERS, ENGINE_THREADS, ENGINE_HASH_MB,
+#   RATE_LIMIT_*, CURRENT_MONTH_CACHE_SECONDS (see .env.example / DEPLOY.md).
 services:
   - type: web
     name: chess-repertoire-api
@@ -7,7 +15,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt && bash scripts/download_stockfish.sh
     startCommand: gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
-    healthCheckPath: /
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.0"
@@ -17,6 +25,14 @@ services:
         generateValue: true
       - key: DATA_DIR
         value: /data
+      - key: ENGINE_POOL_SIZE
+        value: "2"
+      - key: JOB_WORKERS
+        value: "2"
+      - key: ENGINE_THREADS
+        value: "1"
+      - key: ENGINE_HASH_MB
+        value: "16"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: ANALYTICS_ADMIN_EMAIL

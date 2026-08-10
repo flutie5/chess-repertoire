@@ -1025,6 +1025,7 @@
   .review-body b { color: #e8e6e3; font-weight: 700; }
   .review-actions {
     display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+    align-items: center;
   }
   .review-actions button {
     appearance: none; -webkit-appearance: none;
@@ -1039,6 +1040,16 @@
     border-color: rgba(129, 182, 76, .45);
     color: #c5e1a5;
   }
+  .review-progress {
+    width: 100%;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: #787774;
+    margin-bottom: 2px;
+  }
+  .review-nav-row {
+    display: flex; flex-wrap: wrap; gap: 8px; width: 100%;
+  }
+  .review-nav-row .review-primary { flex: 1 1 auto; min-width: 120px; }
   .game-panel-nav {
     display: flex; gap: 8px; padding: 10px 12px 12px;
     border-top: 1px solid rgba(255,255,255,.06); background: #262421;
@@ -2270,10 +2281,13 @@
           <span class="review-headline" id="review-headline"></span>
         </div>
         <div class="review-body" id="review-body"></div>
-        <div class="review-actions">
-          <button type="button" class="review-primary" id="review-see-played">See your move</button>
-          <button type="button" id="review-prev-issue">Previous issue</button>
-          <button type="button" id="review-next-issue">Next issue</button>
+          <div class="review-actions">
+          <div class="review-progress" id="review-progress"></div>
+          <div class="review-nav-row">
+            <button type="button" id="review-prev-issue" title="Previous mistake in this scan">← Prev</button>
+            <button type="button" class="review-primary" id="review-next-issue" title="Next mistake or next game">Next →</button>
+          </div>
+          <button type="button" id="review-see-played">See your move</button>
         </div>
       </div>
       <div id="game-analyze-status" aria-live="polite"></div>
@@ -3070,14 +3084,30 @@ async function fetchEval(fen) {
     try {
       data = await readJson(resp);
     } catch (e) {
-      // Netlify proxy miss / HTML error page — retry once against Render.
-      if (e.isProxyMiss && !apiBase) {
+      // Netlify proxy miss / HTML error page — retry once against configured API base.
+      if (e.isProxyMiss && !apiBase && RENDER_API) {
         apiBase = RENDER_API;
         resp = await fetchApi(path);
         data = await readJson(resp);
       } else {
         throw e;
       }
+    }
+    if (resp.status === 401 || data?.code === "login_required") {
+      engineAvailable = null;
+      enginePanel.classList.add("visible");
+      labelEl.textContent = "Stockfish — sign in to see evaluations";
+      handleProGateError(Object.assign(new Error(data?.error || "Sign in required"), {
+        status: 401,
+        code: "login_required",
+      }));
+      return;
+    }
+    if (resp.status === 429) {
+      engineAvailable = null;
+      enginePanel.classList.add("visible");
+      labelEl.textContent = "Stockfish — busy, retrying shortly…";
+      return;
     }
     if (resp.status === 503) {
       engineAvailable = null;  // allow later retries (cold start / missing binary)
@@ -3332,6 +3362,7 @@ const gameReviewNoteEl = document.getElementById("game-review-note");
 const reviewSevBadgeEl = document.getElementById("review-sev-badge");
 const reviewHeadlineEl = document.getElementById("review-headline");
 const reviewBodyEl = document.getElementById("review-body");
+const reviewProgressEl = document.getElementById("review-progress");
 const reviewSeePlayedBtn = document.getElementById("review-see-played");
 const reviewPrevIssueBtn = document.getElementById("review-prev-issue");
 const reviewNextIssueBtn = document.getElementById("review-next-issue");
@@ -3340,6 +3371,17 @@ function currentReviewIssue() {
   const lesson = state.reviewLesson;
   if (!lesson?.issues?.length) return null;
   return lesson.issues[lesson.index] || null;
+}
+
+function reviewGameKey(g) {
+  if (!g) return "";
+  if (g.url) return String(g.url);
+  return [
+    g.opponent || "",
+    g.date || "",
+    g.variation || "",
+    (g.san || []).slice(0, 10).join(" "),
+  ].join("|");
 }
 
 function clearReviewLesson() {
@@ -3402,20 +3444,44 @@ function renderReviewNote() {
     reviewSevBadgeEl.className = "qbadge " + copy.severity;
     reviewSevBadgeEl.textContent = copy.glyph;
   }
-  if (reviewHeadlineEl) reviewHeadlineEl.textContent = copy.headline;
+  if (reviewHeadlineEl) {
+    const vs = issue.game?.opponent ? ` vs ${issue.game.opponent}` : "";
+    reviewHeadlineEl.textContent = copy.headline + vs;
+  }
   if (reviewBodyEl) reviewBodyEl.innerHTML = copy.bodyHtml;
 
-  const multi = lesson.issues.length > 1;
+  const total = lesson.issues.length;
+  const multi = total > 1;
+  const nextIdx = lesson.index + 1;
+  const hasNext = nextIdx < total;
+  const nextIsNewGame = hasNext &&
+    reviewGameKey(lesson.issues[nextIdx].game) !== reviewGameKey(issue.game);
+  const gameCount = new Set(lesson.issues.map(x => reviewGameKey(x.game))).size;
+
+  if (reviewProgressEl) {
+    reviewProgressEl.hidden = !multi;
+    reviewProgressEl.textContent = multi
+      ? `Mistake ${lesson.index + 1} of ${total}` +
+        (gameCount > 1 ? ` · ${gameCount} games in this scan` : "")
+      : "";
+  }
   if (reviewPrevIssueBtn) {
     reviewPrevIssueBtn.hidden = !multi;
     reviewPrevIssueBtn.disabled = lesson.index <= 0;
   }
   if (reviewNextIssueBtn) {
     reviewNextIssueBtn.hidden = !multi;
-    reviewNextIssueBtn.disabled = lesson.index >= lesson.issues.length - 1;
-    reviewNextIssueBtn.textContent = multi
-      ? `Next issue (${lesson.index + 1}/${lesson.issues.length})`
-      : "Next issue";
+    reviewNextIssueBtn.disabled = !hasNext;
+    if (!hasNext) {
+      reviewNextIssueBtn.textContent = "Done";
+    } else if (nextIsNewGame) {
+      // No more mistakes in this game — advance to the next game's first issue.
+      reviewNextIssueBtn.textContent = "Next game →";
+      reviewNextIssueBtn.title = "No more mistakes in this game — open the next game";
+    } else {
+      reviewNextIssueBtn.textContent = "Next mistake →";
+      reviewNextIssueBtn.title = "Next opening mistake in this game";
+    }
   }
   if (reviewSeePlayedBtn) {
     const atCritical = state.ply === Math.max(0, issue.flag.ply - 1);
@@ -3470,6 +3536,19 @@ reviewSeePlayedBtn?.addEventListener("click", () => {
 });
 reviewPrevIssueBtn?.addEventListener("click", () => stepOpeningLesson(-1));
 reviewNextIssueBtn?.addEventListener("click", () => stepOpeningLesson(1));
+
+document.addEventListener("keydown", e => {
+  if (!state.reviewLesson || !state.gameView) return;
+  const tag = (e.target && e.target.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (e.key === "n" || e.key === "N") {
+    e.preventDefault();
+    stepOpeningLesson(1);
+  } else if (e.key === "p" || e.key === "P") {
+    e.preventDefault();
+    stepOpeningLesson(-1);
+  }
+});
 
 async function requestGameAnnotations(sanList, token) {
   if (!sanList?.length) return;
@@ -4751,8 +4830,17 @@ const meBtn = document.getElementById("analyze-me-btn");
 
 let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" report)
 
-/** Prefer same-origin /api proxy; fall back to Render if Netlify returns HTML 404s. */
-const RENDER_API = "https://chess-repertoire-bteo.onrender.com";
+/** Optional direct API base (set via window.OPENING_EXPLORER_API or meta tag).
+ * Prefer same-origin /api proxy; only fall back when an explicit base is configured. */
+function configuredApiBase() {
+  if (typeof window.OPENING_EXPLORER_API === "string" && window.OPENING_EXPLORER_API.trim()) {
+    return window.OPENING_EXPLORER_API.trim().replace(/\/$/, "");
+  }
+  const meta = document.querySelector('meta[name="opening-explorer-api"]');
+  const content = meta?.getAttribute("content")?.trim();
+  return content ? content.replace(/\/$/, "") : "";
+}
+const RENDER_API = configuredApiBase();
 let apiBase = "";  // "" = same origin
 
 function apiUrl(path) {
@@ -4835,7 +4923,7 @@ async function ensureApiBase() {
       location.hostname === "127.0.0.1" || location.hostname === "localhost") {
     return;
   }
-  // Probe same-origin proxy once; if it's a dead Netlify site, switch to Render.
+  // Probe same-origin proxy once; if it's a dead Netlify site, switch to configured API.
   try {
     const resp = await fetch("/api/me", { credentials: "same-origin" });
     const text = await resp.text();
@@ -4843,10 +4931,10 @@ async function ensureApiBase() {
         (text.trim().startsWith("Not Found") || !text.trim().startsWith("{"))) {
       // Confirm it's not Flask JSON 401
       try { JSON.parse(text); return; } catch (_) {}
-      apiBase = RENDER_API;
+      if (RENDER_API) apiBase = RENDER_API;
     }
   } catch (_) {
-    apiBase = RENDER_API;
+    if (RENDER_API) apiBase = RENDER_API;
   }
 }
 
@@ -4892,7 +4980,7 @@ async function runReport(startPath, syncPath, fetchingMsg) {
       startResp = await fetchApi(`${startPath}${qs}`);
       start = await readJson(startResp);
     } catch (e) {
-      if (e.isProxyMiss && !apiBase) {
+      if (e.isProxyMiss && !apiBase && RENDER_API) {
         apiBase = RENDER_API;
         statusEl.textContent = "Netlify API proxy missing — using Render directly\u2026";
         startResp = await fetchApi(`${startPath}${qs}`);
@@ -4932,7 +5020,7 @@ async function runReport(startPath, syncPath, fetchingMsg) {
         consecutiveFails = 0;
       } catch (e) {
         consecutiveFails++;
-        if (e.isProxyMiss && !apiBase) {
+        if (e.isProxyMiss && !apiBase && RENDER_API) {
           apiBase = RENDER_API;
           continue;
         }
@@ -5271,7 +5359,7 @@ async function api(path, method, body) {
   } catch (e) {
     // Netlify proxy miss / HTML error page — retry once against Render
     // (same path as fetchEval / runReport; scan-blunders uses this helper).
-    if (e.isProxyMiss && !apiBase) {
+    if (e.isProxyMiss && !apiBase && RENDER_API) {
       apiBase = RENDER_API;
       resp = await fetchApi(path, opts);
       data = await readJson(resp);
@@ -5303,7 +5391,7 @@ async function apiScanBlunders(body, onStatus) {
     try {
       data = await readJson(resp);
     } catch (e) {
-      if (e.isProxyMiss && !apiBase) {
+      if (e.isProxyMiss && !apiBase && RENDER_API) {
         apiBase = RENDER_API;
         if (onStatus) onStatus("Netlify proxy timed out — using Render directly\u2026");
         resp = await fetchApi("/api/scan-blunders/jobs", opts);
@@ -5349,7 +5437,7 @@ async function apiScanBlunders(body, onStatus) {
         pollResp = await fetchApi(`/api/scan-blunders/jobs/${encodeURIComponent(jobId)}`);
         poll = await readJson(pollResp);
       } catch (e) {
-        if (e.isProxyMiss && !apiBase) {
+        if (e.isProxyMiss && !apiBase && RENDER_API) {
           apiBase = RENDER_API;
           continue;
         }
@@ -5367,7 +5455,7 @@ async function apiScanBlunders(body, onStatus) {
   }
 
   // Sync fallback — hit Render directly so Netlify's ~26s proxy cannot cut us off.
-  if (!apiBase && location.hostname !== "127.0.0.1" && location.hostname !== "localhost"
+  if (!apiBase && RENDER_API && location.hostname !== "127.0.0.1" && location.hostname !== "localhost"
       && !location.hostname.includes("onrender.com")) {
     apiBase = RENDER_API;
     if (onStatus) onStatus("Scanning via Render (long analysis)\u2026");
@@ -7942,6 +8030,124 @@ refreshBoard();
 updateEditTurnBtns();
 syncProChips();
 requestAnimationFrame(syncSidebarToBoard);
+
+/** Local demo: ?demo=opening-lesson — opens the post-scan coaching board UI. */
+function runOpeningLessonDemo() {
+  markIntroSeen();
+  closeIntroModal();
+  const g1 = {
+    san: ["e4", "e5", "Nf3", "Nc6", "Bc4", "Qh4", "O-O", "Bc5", "d4"],
+    color: "black",
+    variation: "Italian Game",
+    opponent: "DemoPlayer",
+    date: "2026-08-01",
+    url: "#demo-italian",
+    result: "loss",
+    white: { username: "DemoPlayer", rating: 1500 },
+    black: { username: "you", rating: 1480 },
+    _annotated: true,
+    _flags: [
+      {
+        ply: 6,
+        san: "Qh4",
+        severity: "blunder",
+        loss_cp: 320,
+        best_san: "Nf6",
+        color: "black",
+      },
+      {
+        ply: 8,
+        san: "Bc5",
+        severity: "inaccuracy",
+        loss_cp: 70,
+        best_san: "d6",
+        color: "black",
+      },
+    ],
+    _worst: "blunder",
+  };
+  const g2 = {
+    san: ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6", "Be2", "e5"],
+    color: "black",
+    variation: "Sicilian Defense",
+    opponent: "DemoPlayer2",
+    date: "2026-08-02",
+    url: "#demo-sicilian",
+    result: "loss",
+    white: { username: "DemoPlayer2", rating: 1520 },
+    black: { username: "you", rating: 1480 },
+    _annotated: true,
+    _flags: [{
+      ply: 12,
+      san: "e5",
+      severity: "mistake",
+      loss_cp: 150,
+      best_san: "e6",
+      color: "black",
+    }],
+    _worst: "mistake",
+  };
+  const g3 = {
+    san: ["d4", "Nf6", "c4", "g6", "Nc3", "d5", "cxd5", "Nxd5", "e4", "Nxc3", "bxc3", "Bg7", "Nf3", "c5"],
+    color: "black",
+    variation: "Gruenfeld Defense",
+    opponent: "DemoPlayer3",
+    date: "2026-08-03",
+    url: "#demo-gruenfeld",
+    result: "draw",
+    white: { username: "DemoPlayer3", rating: 1550 },
+    black: { username: "you", rating: 1480 },
+    _annotated: true,
+    _flags: [{
+      ply: 14,
+      san: "c5",
+      severity: "mistake",
+      loss_cp: 120,
+      best_san: "c6",
+      color: "black",
+    }],
+    _worst: "mistake",
+  };
+  state.orientation = "black";
+  state.color = "black";
+  // Tiny report so closing game view isn't a blank Analyze screen.
+  applyReport({
+    username: "demo",
+    analyzed_games: 3,
+    months: 1,
+    white: { total_games: 0, score: 0, openings: [] },
+    black: {
+      total_games: 3,
+      score: 0,
+      openings: [{
+        name: "Italian Game",
+        eco: "C50",
+        games: 1,
+        wins: 0, losses: 1, draws: 0,
+        score: 0,
+        game_list: [g1, g2, g3],
+        lines: [],
+      }],
+    },
+  });
+  openOpeningLesson([
+    { game: g1, flag: g1._flags[0] },
+    { game: g1, flag: g1._flags[1] },
+    { game: g2, flag: g2._flags[0] },
+    { game: g3, flag: g3._flags[0] },
+  ], 0);
+  if (statusEl) {
+    statusEl.className = "";
+    statusEl.textContent = "Demo: Next mistake stays in-game; when that runs out it becomes Next game.";
+  }
+}
+
+try {
+  const demo = new URLSearchParams(location.search).get("demo");
+  if (demo === "opening-lesson") {
+    requestAnimationFrame(() => runOpeningLessonDemo());
+  }
+} catch (e) { /* ignore */ }
 </script>
 </body>
 </html>
