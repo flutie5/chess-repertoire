@@ -3257,6 +3257,7 @@ async function requestGameAnnotations(sanList, token) {
   try {
     const data = await api("/api/annotate-game", "POST", { san: sanList });
     if (token !== gameAnnotateToken) return; // stale — another game opened
+    gaEvent("game_review", { move_count: sanList.length });
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
     state.moveFlags = anns;
     if (state.activeGame) {
@@ -4577,6 +4578,12 @@ async function ensureApiBase() {
 function applyReport(data) {
   state.report = data;
   if (data.username) rememberUsername(data.username);
+  gaEvent("analyze_repertoire", {
+    time_classes: Array.isArray(data.time_classes) ? data.time_classes.join(",") : undefined,
+    sources: Array.isArray(data.sources) ? data.sources.join(",") : undefined,
+    months: data.months ?? undefined,
+    analyzed_games: data.analyzed_games ?? undefined,
+  });
   let msg = `${data.analyzed_games} rated games analyzed (${
     data.since || data.until
       ? rangeLabel.textContent
@@ -4904,6 +4911,7 @@ function syncProChips() {
 
 function setUser(user) {
   currentUser = user;
+  gaSetUserProperties(user);
   const loggedIn = !!user;
   document.body.classList.toggle("logged-in", loggedIn);
   authOpenBtn.style.display = loggedIn ? "none" : "";
@@ -5084,6 +5092,11 @@ async function startCheckout(interval) {
   try {
     const data = await api("/api/billing/checkout", "POST", { interval });
     if (data.url) {
+      gaEvent("begin_checkout", {
+        currency: "USD",
+        value: PRO_PRICE_USD[interval],
+        items: [{ item_id: `pro_${interval}`, item_name: "Opening Explorer Pro", price: PRO_PRICE_USD[interval], quantity: 1 }],
+      });
       window.location.href = data.url;
       return;
     }
@@ -5146,6 +5159,19 @@ async function refreshMeAfterBilling() {
     const user = await api("/api/me", "GET");
     setUser(user);
     closeUpgradeModal();
+    // Fired once, right when the Stripe Checkout redirect lands back with
+    // ?billing=success (that query param is stripped immediately after, so
+    // this can't double-fire on reload). Note: with the 3-day free trial,
+    // this marks completing the checkout flow, not necessarily an immediate
+    // charge — there's no server-side Measurement Protocol wiring yet to
+    // fire only on an actual Stripe charge.
+    const interval = user.plan_interval === "year" ? "year" : "month";
+    gaEvent("purchase", {
+      currency: "USD",
+      value: PRO_PRICE_USD[interval],
+      transaction_id: "cs_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      items: [{ item_id: `pro_${interval}`, item_name: "Opening Explorer Pro", price: PRO_PRICE_USD[interval], quantity: 1 }],
+    });
   } catch (e) { /* ignore */ }
 }
 
@@ -5169,6 +5195,8 @@ async function submitAuth(path) {
 }
 
 function finishLogin(user, isNewAccount) {
+  const isNew = user.is_new_account ?? isNewAccount;
+  gaEvent(isNew ? "sign_up" : "login", { method: user.auth_provider || "password" });
   setUser(user);
   authModal.classList.remove("open");
   document.getElementById("auth-password").value = "";
@@ -5477,6 +5505,29 @@ async function initGoogleAnalytics() {
     script.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
     document.head.appendChild(script);
   } catch (e) { /* best-effort; never block the app on analytics */ }
+}
+
+/* ---------- Google Analytics: app-specific event tracking ----------
+ * Custom events so GA reports more than raw pageviews: signup/login funnel,
+ * actual feature usage (analyze/game review/practice), and the Pro checkout
+ * funnel. No-ops when gtag isn't loaded (GA unconfigured, or the current user
+ * is the analytics-admin account — see initGoogleAnalytics above). */
+
+// Keep in sync with the prices shown in the upgrade modal ("$6 / month",
+// "$40 / year") — there's no backend endpoint exposing the live Stripe amount.
+const PRO_PRICE_USD = { month: 6, year: 40 };
+
+function gaEvent(name, params) {
+  try {
+    if (typeof window.gtag === "function") window.gtag("event", name, params || {});
+  } catch (e) { /* ignore */ }
+}
+
+function gaSetUserProperties(user) {
+  try {
+    if (typeof window.gtag !== "function") return;
+    window.gtag("set", "user_properties", { plan: user?.is_pro ? "pro" : "free" });
+  } catch (e) { /* ignore */ }
 }
 
 /* ---------- Site visit analytics (self-hosted) ---------- */
@@ -7299,6 +7350,9 @@ function startPractice(entry) {
     return;
   }
   state.practiceElo = +document.getElementById("rep-difficulty").value || 1800;
+  // One event per practice session (not per move — runPracticeReply fires far
+  // too often for that to be a useful GA signal).
+  gaEvent("practice_start", { color: state.repColor, elo: state.practiceElo });
   loadRepLine(entry, true);
   const st = document.getElementById("rep-practice-status");
   if (state.repColor === "black") {
