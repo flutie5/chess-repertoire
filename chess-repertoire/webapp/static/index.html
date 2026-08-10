@@ -1413,16 +1413,6 @@
     background: var(--bg-input);
     font-size: 12px;
   }
-  .analytics-search-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .analytics-search-row:last-child { border-bottom: 0; }
-  .analytics-search-row .q { font-weight: 700; color: var(--text-primary); word-break: break-all; }
-  .analytics-search-row .meta { color: var(--text-muted); white-space: nowrap; }
   .analytics-user-row {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -2017,20 +2007,13 @@
 
   <div class="profile-card" id="profile-analytics-card" hidden>
     <h2>Admin</h2>
-    <p class="hint">Visible only to <code>ANALYTICS_ADMIN_EMAIL</code>. Accounts and visits from production.</p>
+    <p class="hint">Visible only to <code>ANALYTICS_ADMIN_EMAIL</code>. Traffic/visit stats now live in Google Analytics.</p>
     <div class="analytics-stats" id="profile-analytics-stats">
       <div><span class="analytics-num" id="analytics-account-total">—</span><span class="analytics-label">accounts</span></div>
-      <div><span class="analytics-num" id="analytics-today-sessions">—</span><span class="analytics-label">sessions today</span></div>
-      <div><span class="analytics-num" id="analytics-today-views">—</span><span class="analytics-label">views today</span></div>
-      <div><span class="analytics-num" id="analytics-all-sessions">—</span><span class="analytics-label">sessions all-time</span></div>
-      <div><span class="analytics-num" id="analytics-all-views">—</span><span class="analytics-label">views all-time</span></div>
     </div>
     <h3 style="margin:16px 0 6px;font-size:14px">Accounts</h3>
     <p class="hint" style="margin:0 0 8px">Emails of everyone who signed up. Set a temporary password for email/password resets (tell them out of band).</p>
     <div id="analytics-users-list" class="analytics-search-list"></div>
-    <h3 style="margin:16px 0 6px;font-size:14px">Search bar analyzes</h3>
-    <p class="hint" style="margin:0 0 8px">Every Analyze lookup (username or Analyze my games). Latest 200.</p>
-    <div id="analytics-search-list" class="analytics-search-list"></div>
     <div class="form-msg" id="analytics-msg"></div>
   </div>
 
@@ -4956,9 +4939,7 @@ function fillProfileForm(user) {
     analyticsCard.style.display = showAdmin ? "" : "none";
     if (!showAdmin) {
       const usersList = document.getElementById("analytics-users-list");
-      const searchList = document.getElementById("analytics-search-list");
       if (usersList) usersList.innerHTML = "";
-      if (searchList) searchList.innerHTML = "";
     }
   }
 }
@@ -5451,8 +5432,6 @@ authModal.addEventListener("click", e => {
   }
   // Prefetch Google Identity so Continue with Google is ready when the modal opens.
   if (!currentUser) warmGoogleSignIn();
-  // After session restore so admin logins are not counted as visits.
-  trackVisit();
   initGoogleAnalytics();
 })();
 
@@ -5464,7 +5443,7 @@ authModal.addEventListener("click", e => {
 
 async function initGoogleAnalytics() {
   try {
-    if (currentUser?.can_view_analytics) return; // exclude the site admin, like self-hosted stats
+    if (currentUser?.can_view_analytics) return; // exclude the site owner's own traffic
     const cfg = await fetchSiteConfig();
     const id = (cfg.ga_measurement_id || "").trim();
     if (!id || window.gtag) return;
@@ -5479,60 +5458,22 @@ async function initGoogleAnalytics() {
   } catch (e) { /* best-effort; never block the app on analytics */ }
 }
 
-/* ---------- Site visit analytics (self-hosted) ---------- */
-
-function analyticsSessionId() {
-  try {
-    let sid = sessionStorage.getItem("oe_sid");
-    if (!sid) {
-      sid = (crypto.randomUUID && crypto.randomUUID()) ||
-        ("s" + Math.random().toString(36).slice(2) + Date.now().toString(36));
-      sessionStorage.setItem("oe_sid", sid);
-    }
-    return sid;
-  } catch (e) {
-    return "anon" + Date.now().toString(36);
-  }
-}
-
-async function trackVisit() {
-  try {
-    // Don't count the admin account — only other visitors matter.
-    if (currentUser?.can_view_analytics) return;
-    await ensureApiBase();
-    const path = location.pathname || "/";
-    const flag = "oe_hit_" + path;
-    if (sessionStorage.getItem(flag)) return;
-    sessionStorage.setItem(flag, "1");
-    fetch(apiUrl("/api/analytics/hit"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: analyticsSessionId(),
-        path,
-      }),
-      credentials: "include",
-      keepalive: true,
-    }).catch(() => {});
-  } catch (e) { /* ignore */ }
-}
+/* ---------- Admin: registered accounts ----------
+ * Traffic/visit tracking used to be self-hosted here too, but that's now
+ * covered by Google Analytics (see initGoogleAnalytics above) — this only
+ * loads the accounts list + password-reset tool, which GA can't provide. */
 
 async function loadAnalyticsSummary() {
   const msg = document.getElementById("analytics-msg");
-  const list = document.getElementById("analytics-search-list");
   const usersList = document.getElementById("analytics-users-list");
   setMsg(msg, "");
   try {
-    const data = await api("/api/analytics/summary", "GET");
+    const data = await api("/api/admin/accounts", "GET");
     const set = (id, n) => {
       const el = document.getElementById(id);
       if (el) el.textContent = String(n ?? 0);
     };
     set("analytics-account-total", data.accounts?.total);
-    set("analytics-today-sessions", data.today?.sessions);
-    set("analytics-today-views", data.today?.pageviews);
-    set("analytics-all-sessions", data.all_time?.sessions);
-    set("analytics-all-views", data.all_time?.pageviews);
 
     if (usersList) {
       const users = data.accounts?.users || [];
@@ -5562,28 +5503,6 @@ async function loadAnalyticsSummary() {
         usersList.querySelectorAll(".admin-set-pw-btn").forEach(btn => {
           btn.addEventListener("click", () => adminSetUserPassword(btn));
         });
-      }
-    }
-
-    if (list) {
-      const rows = data.searches?.recent || [];
-      const total = data.searches?.total ?? rows.length;
-      if (!rows.length) {
-        list.innerHTML = `<div class="analytics-search-row"><span class="meta">No searches logged yet (${total} total).</span></div>`;
-      } else {
-        list.innerHTML = rows.map(r => {
-          const when = r.created_at
-            ? new Date(r.created_at * 1000).toLocaleString()
-            : "";
-          const kind = r.kind === "me" ? "my games" : (r.source || "search");
-          return `<div class="analytics-search-row">` +
-            `<span class="q">${escapeHtml(r.query || "")}</span>` +
-            `<span class="meta">${escapeHtml(kind)} · ${escapeHtml(when)}</span>` +
-            `</div>`;
-        }).join("") +
-          (total > rows.length
-            ? `<div class="analytics-search-row"><span class="meta">Showing ${rows.length} of ${total}</span></div>`
-            : "");
       }
     }
   } catch (e) {
