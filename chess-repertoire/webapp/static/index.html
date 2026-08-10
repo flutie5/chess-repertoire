@@ -45,6 +45,7 @@
     --hl: rgba(255, 255, 51, 0.5);   /* last-move highlight, chess.com yellow */
     --hl-blunder: rgba(250, 65, 45, 0.55);
     --hl-mistake: rgba(230, 159, 0, 0.55);
+    --hl-inaccuracy: rgba(86, 180, 233, 0.45);
     --hl-great: rgba(86, 180, 233, 0.55);
     --hl-brilliant: rgba(143, 211, 255, 0.6); /* light blue */
     --hl-best: rgba(129, 182, 76, 0.5);
@@ -677,6 +678,7 @@
   .sq.hl::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
   .sq.hl-blunder::after { background: var(--hl-blunder); }
   .sq.hl-mistake::after { background: var(--hl-mistake); }
+  .sq.hl-inaccuracy::after { background: var(--hl-inaccuracy); }
   .sq.hl-great::after { background: var(--hl-great); }
   .sq.hl-brilliant::after { background: var(--hl-brilliant); }
   .sq.hl-best::after { background: var(--hl-best); }
@@ -897,6 +899,7 @@
   #game-moves::-webkit-scrollbar-thumb { background: #3d3a37; border-radius: 3px; }
   #game-opening-title,
   #game-analyze-status,
+  #game-review-note,
   .game-panel-nav { flex: none; }
   /* Chess.com Moves panel: zebra rows, number | white | black */
   .gm-row {
@@ -937,11 +940,13 @@
   /* Annotation colors tint SAN + figurine filter via currentColor */
   .gm-mv.ann-blunder { color: #fa412d; }
   .gm-mv.ann-mistake { color: #e69f00; }
+  .gm-mv.ann-inaccuracy { color: #56b4e9; }
   .gm-mv.ann-great { color: #56b4e9; }
   .gm-mv.ann-best,
   .gm-mv.ann-brilliant { color: #81b64c; }
   .gm-mv.cur.ann-blunder { color: #fa412d; }
   .gm-mv.cur.ann-mistake { color: #e69f00; }
+  .gm-mv.cur.ann-inaccuracy { color: #56b4e9; }
   .gm-mv.cur.ann-great { color: #56b4e9; }
   .gm-mv.cur.ann-best,
   .gm-mv.cur.ann-brilliant { color: #81b64c; }
@@ -963,6 +968,7 @@
   }
   .gm-ann.ann-blunder { background: #fa412d; font-size: 7px; letter-spacing: -0.08em; }
   .gm-ann.ann-mistake { background: #e69f00; }
+  .gm-ann.ann-inaccuracy { background: #56b4e9; font-size: 7px; letter-spacing: -0.08em; }
   .gm-ann.ann-great { background: #56b4e9; font-size: 10px; font-weight: 700; }
   .gm-ann.ann-best,
   .gm-ann.ann-brilliant {
@@ -991,6 +997,48 @@
     color: #787774; font-weight: 600;
   }
   #game-analyze-status.visible { display: block; }
+  #game-review-note {
+    display: none;
+    margin: 8px 12px 10px;
+    padding: 12px 14px;
+    background: #1f1e1b;
+    border: 1px solid rgba(255,255,255,.08);
+    border-left: 3px solid var(--green);
+    border-radius: 6px;
+    flex: none;
+  }
+  #game-review-note.visible { display: block; }
+  #game-review-note.sev-blunder { border-left-color: #fa412d; }
+  #game-review-note.sev-mistake { border-left-color: #e69f00; }
+  #game-review-note.sev-inaccuracy { border-left-color: #56b4e9; }
+  .review-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px; flex-wrap: wrap;
+  }
+  .review-headline {
+    font-size: 14px; font-weight: 700; color: #eee;
+    line-height: 1.3;
+  }
+  .review-body {
+    font-size: 13px; line-height: 1.45; color: #a7a6a2;
+  }
+  .review-body b { color: #e8e6e3; font-weight: 700; }
+  .review-actions {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+  }
+  .review-actions button {
+    appearance: none; -webkit-appearance: none;
+    background: #312e2b; color: #c3c2c1;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .review-actions button:hover { background: #3d3a37; color: #fff; border-color: var(--green); }
+  .review-actions button:disabled { opacity: .4; cursor: default; }
+  .review-actions .review-primary {
+    background: rgba(129, 182, 76, .18);
+    border-color: rgba(129, 182, 76, .45);
+    color: #c5e1a5;
+  }
   .game-panel-nav {
     display: flex; gap: 8px; padding: 10px 12px 12px;
     border-top: 1px solid rgba(255,255,255,.06); background: #262421;
@@ -1242,8 +1290,9 @@
   .pattern {
     background: var(--bg-input); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px;
-    font-size: 12px; color: var(--text-secondary);
+    font-size: 12px; color: var(--text-secondary); cursor: pointer;
   }
+  .pattern:hover { border-color: var(--green); }
   .pattern .ptop {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin-bottom: 4px; color: var(--text-primary); font-weight: 600;
@@ -2215,6 +2264,18 @@
     </div>
     <div id="game-panel" aria-label="Game moves">
       <div id="game-opening-title"></div>
+      <div id="game-review-note" aria-live="polite">
+        <div class="review-head">
+          <span class="qbadge" id="review-sev-badge"></span>
+          <span class="review-headline" id="review-headline"></span>
+        </div>
+        <div class="review-body" id="review-body"></div>
+        <div class="review-actions">
+          <button type="button" class="review-primary" id="review-see-played">See your move</button>
+          <button type="button" id="review-prev-issue">Previous issue</button>
+          <button type="button" id="review-next-issue">Next issue</button>
+        </div>
+      </div>
       <div id="game-analyze-status" aria-live="polite"></div>
       <div id="game-moves"></div>
       <div class="game-panel-nav">
@@ -2304,6 +2365,7 @@ const state = {
   openingSort: "frequent", // "frequent" | "recent"
   gameView: false,         // true when replaying a selected game (sidebar = moves)
   activeGame: null,        // game entry currently open in game view
+  reviewLesson: null,      // { issues, index } opening-blunder coaching session
 };
 
 /* ---------- game model (chess.js) ---------- */
@@ -2536,6 +2598,7 @@ const boardEl = document.getElementById("board");
 const ANN_GLYPH = {
   blunder: "??",
   mistake: "?",
+  inaccuracy: "?!",
   great: "!",
   best: "★",
   brilliant: "★",
@@ -2846,6 +2909,16 @@ function refreshBoard() {
     if (mv?.from && mv?.to) hl = new Set([mv.from, mv.to]);
     hlSeverity = annotationAtPly(state.ply)?.severity || null;
   }
+  // Opening lesson: at the critical position (before the bad move), tint the
+  // squares of the move that was actually played so the mistake is visible.
+  const lesson = currentReviewIssue();
+  if (lesson && state.ply === Math.max(0, lesson.flag.ply - 1)) {
+    const played = parseBestMove(currentFen(), lesson.flag.san);
+    if (played) {
+      hl = new Set([played.from, played.to]);
+      hlSeverity = lesson.flag.severity || hlSeverity;
+    }
+  }
   clearSelection({ keepPremove: true, keepShapes: true });
   renderBoard(currentFen(), state.orientation, hl, hlSeverity);
   applyCheckHighlight();
@@ -2858,6 +2931,7 @@ function refreshBoard() {
   scheduleEval();
   if (state.repertoireOpen) updateRepTreeActive();
   renderUserShapes();
+  drawReviewBestArrow();
 }
 
 /* ---------- dynamic opening title ---------- */
@@ -3060,6 +3134,8 @@ function renderEval(data) {
     const mv = parseBestMove(currentFen(), data.best_san);
     if (mv) drawBestArrow(mv.from, mv.to);
     else clearBestArrow();
+  } else if (drawReviewBestArrow()) {
+    /* review lesson arrow already drawn */
   } else if (!showBestMove) {
     clearBestArrow();
   }
@@ -3251,6 +3327,150 @@ function setGameAnalyzeStatus(text) {
   }
 }
 
+const REVIEW_SEV_RANK = { blunder: 3, mistake: 2, inaccuracy: 1 };
+const gameReviewNoteEl = document.getElementById("game-review-note");
+const reviewSevBadgeEl = document.getElementById("review-sev-badge");
+const reviewHeadlineEl = document.getElementById("review-headline");
+const reviewBodyEl = document.getElementById("review-body");
+const reviewSeePlayedBtn = document.getElementById("review-see-played");
+const reviewPrevIssueBtn = document.getElementById("review-prev-issue");
+const reviewNextIssueBtn = document.getElementById("review-next-issue");
+
+function currentReviewIssue() {
+  const lesson = state.reviewLesson;
+  if (!lesson?.issues?.length) return null;
+  return lesson.issues[lesson.index] || null;
+}
+
+function clearReviewLesson() {
+  state.reviewLesson = null;
+  if (gameReviewNoteEl) {
+    gameReviewNoteEl.classList.remove("visible", "sev-blunder", "sev-mistake", "sev-inaccuracy");
+  }
+}
+
+function formatReviewCopy(flag) {
+  const moveNum = Math.ceil(flag.ply / 2);
+  const dots = flag.ply % 2 === 0 ? "..." : ".";
+  const sev = flag.severity || "inaccuracy";
+  const label = sev.charAt(0).toUpperCase() + sev.slice(1);
+  const loss = ((flag.loss_cp || 0) / 100).toFixed(1);
+  let why;
+  if (sev === "blunder") {
+    why = `Your move gave away about <b>${loss}</b> pawns of evaluation — a serious opening error.`;
+  } else if (sev === "mistake") {
+    why = `Your move lost about <b>${loss}</b> pawns of evaluation and handed your opponent a clear edge.`;
+  } else {
+    why = `Your move was inaccurate, costing about <b>${loss}</b> pawns of evaluation.`;
+  }
+  const better = flag.best_san
+    ? ` The engine’s preferred move was <b>${flag.best_san}</b> (green arrow), which keeps the position healthier.`
+    : ` Look for a stronger alternative that doesn’t give ground here.`;
+  return {
+    severity: sev,
+    glyph: ANN_GLYPH[sev] || "?!",
+    headline: `${label} · ${moveNum}${dots} ${flag.san}`,
+    bodyHtml: why + better,
+  };
+}
+
+/** Draw the lesson’s best-move arrow when sitting on the critical pre-move ply. */
+function drawReviewBestArrow() {
+  const issue = currentReviewIssue();
+  if (!issue?.flag?.best_san) return false;
+  const criticalPly = Math.max(0, issue.flag.ply - 1);
+  if (state.ply !== criticalPly) return false;
+  const mv = parseBestMove(currentFen(), issue.flag.best_san);
+  if (!mv) return false;
+  drawBestArrow(mv.from, mv.to);
+  return true;
+}
+
+function renderReviewNote() {
+  if (!gameReviewNoteEl) return;
+  const lesson = state.reviewLesson;
+  const issue = currentReviewIssue();
+  if (!lesson || !issue) {
+    gameReviewNoteEl.classList.remove("visible", "sev-blunder", "sev-mistake", "sev-inaccuracy");
+    return;
+  }
+  const copy = formatReviewCopy(issue.flag);
+  gameReviewNoteEl.classList.add("visible");
+  gameReviewNoteEl.classList.remove("sev-blunder", "sev-mistake", "sev-inaccuracy");
+  gameReviewNoteEl.classList.add(`sev-${copy.severity}`);
+  if (reviewSevBadgeEl) {
+    reviewSevBadgeEl.className = "qbadge " + copy.severity;
+    reviewSevBadgeEl.textContent = copy.glyph;
+  }
+  if (reviewHeadlineEl) reviewHeadlineEl.textContent = copy.headline;
+  if (reviewBodyEl) reviewBodyEl.innerHTML = copy.bodyHtml;
+
+  const multi = lesson.issues.length > 1;
+  if (reviewPrevIssueBtn) {
+    reviewPrevIssueBtn.hidden = !multi;
+    reviewPrevIssueBtn.disabled = lesson.index <= 0;
+  }
+  if (reviewNextIssueBtn) {
+    reviewNextIssueBtn.hidden = !multi;
+    reviewNextIssueBtn.disabled = lesson.index >= lesson.issues.length - 1;
+    reviewNextIssueBtn.textContent = multi
+      ? `Next issue (${lesson.index + 1}/${lesson.issues.length})`
+      : "Next issue";
+  }
+  if (reviewSeePlayedBtn) {
+    const atCritical = state.ply === Math.max(0, issue.flag.ply - 1);
+    reviewSeePlayedBtn.textContent = atCritical ? "See your move" : "Back to critical position";
+  }
+}
+
+function collectScanIssues(batch, scanGames) {
+  const issues = [];
+  for (const sg of scanGames || []) {
+    const g = batch[sg.index];
+    if (!g) continue;
+    for (const f of (sg.flags || [])) {
+      if (!f || !REVIEW_SEV_RANK[f.severity]) continue;
+      issues.push({ game: g, flag: f });
+    }
+  }
+  issues.sort((a, b) => {
+    const d = (REVIEW_SEV_RANK[b.flag.severity] || 0) - (REVIEW_SEV_RANK[a.flag.severity] || 0);
+    if (d) return d;
+    return (b.flag.loss_cp || 0) - (a.flag.loss_cp || 0);
+  });
+  return issues;
+}
+
+function openOpeningLesson(issues, startIndex = 0) {
+  if (!issues?.length) return;
+  const idx = Math.max(0, Math.min(startIndex, issues.length - 1));
+  state.reviewLesson = { issues, index: idx };
+  const { game: g, flag } = issues[idx];
+  const seekPly = Math.max(0, (flag.ply || 1) - 1);
+  loadGameReplay(g, { seekPly, skipAnim: true, keepReview: true });
+  renderReviewNote();
+  drawReviewBestArrow();
+}
+
+function stepOpeningLesson(delta) {
+  const lesson = state.reviewLesson;
+  if (!lesson?.issues?.length) return;
+  const next = lesson.index + delta;
+  if (next < 0 || next >= lesson.issues.length) return;
+  openOpeningLesson(lesson.issues, next);
+}
+
+reviewSeePlayedBtn?.addEventListener("click", () => {
+  const issue = currentReviewIssue();
+  if (!issue) return;
+  const critical = Math.max(0, issue.flag.ply - 1);
+  if (state.ply === critical) setPly(issue.flag.ply);
+  else setPly(critical);
+  renderReviewNote();
+});
+reviewPrevIssueBtn?.addEventListener("click", () => stepOpeningLesson(-1));
+reviewNextIssueBtn?.addEventListener("click", () => stepOpeningLesson(1));
+
 async function requestGameAnnotations(sanList, token) {
   if (!sanList?.length) return;
   setGameAnalyzeStatus("Analyzing moves…");
@@ -3379,6 +3599,7 @@ function setGameView(on, game) {
 function closeGameView() {
   gameAnnotateToken += 1; // cancel in-flight annotate
   setGameAnalyzeStatus("");
+  clearReviewLesson();
   setGameView(false);
   clearBoardPlayers();
   // Return mobile users to insights — board stays optional.
@@ -3487,6 +3708,7 @@ function renderMoveList() {
 function setPly(p) {
   state.ply = Math.max(0, Math.min(state.sans.length, p));
   refreshBoard();
+  if (state.reviewLesson) renderReviewNote();
 }
 function clearGamesFilters() {
   document.querySelectorAll(".line.active").forEach(el => {
@@ -3824,7 +4046,7 @@ function loadLine(line, openingName) {
   }
 }
 
-function loadGameReplay(g) {
+function loadGameReplay(g, opts = {}) {
   // Load the game into the analyzer and switch sidebar to chess.com-style moves.
   if (state.editMode) setEditMode(false);
   freeFen = null;
@@ -3845,12 +4067,20 @@ function loadGameReplay(g) {
   exploreAnnotateToken += 1;
   state.moveFlags = g._flags || [];
   state.lastOpeningName = g.variation || null;
+  if (!opts.keepReview) clearReviewLesson();
   titleEl.textContent = g.variation || "Starting position";
   setBoardPlayersFromGame(g);
   if (isMobileLayout()) setShowBoard(true);
   setGameView(true, g);
   // Keep any variation filter/highlight: the user is browsing that list.
-  animateLine(GAME_PREVIEW_PLIES);
+  cancelLineAnim(false);
+  if (opts.skipAnim) {
+    const seek = opts.seekPly == null ? 0 : Math.max(0, Math.min(opts.seekPly, sans.length));
+    state.ply = seek;
+    refreshBoard();
+  } else {
+    animateLine(GAME_PREVIEW_PLIES);
+  }
   if (isMobileLayout()) {
     document.querySelector(".board-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -3866,6 +4096,7 @@ function loadGameReplay(g) {
   } else {
     setGameAnalyzeStatus("");
   }
+  if (opts.keepReview) renderReviewNote();
 }
 
 /* ---------- sidebar ---------- */
@@ -4334,7 +4565,7 @@ function appendGamesSection(lines, op) {
 
   let activeFilter = null;
 
-  function renderPatterns(patterns) {
+  function renderPatterns(patterns, scanBatch) {
     patternsEl.innerHTML = "";
     if (!patterns || !patterns.length) {
       patternsEl.classList.remove("visible");
@@ -4347,6 +4578,8 @@ function appendGamesSection(lines, op) {
     for (const p of patterns.slice(0, 8)) {
       const card = document.createElement("div");
       card.className = "pattern";
+      card.style.cursor = "pointer";
+      card.title = "Open an example game at this mistake";
       const moveNum = Math.ceil(p.ply / 2);
       const dots = p.ply % 2 === 0 ? "..." : "";
       const sevLabel = p.severity.charAt(0).toUpperCase() + p.severity.slice(1);
@@ -4356,6 +4589,35 @@ function appendGamesSection(lines, op) {
         }</span>${sevLabel}: ${moveNum}.${dots} ${p.move} \u00d7 ${p.count}</div>` +
         `<div class="hint">${p.variation} \u00b7 avg loss ${(p.avg_loss_cp / 100).toFixed(1)}` +
         (p.best_san ? ` \u00b7 better: ${p.best_san}` : "") + `</div>`;
+      card.onclick = () => {
+        const example = (p.games || [])[0];
+        let g = null;
+        if (example && scanBatch && example.index != null) {
+          g = scanBatch[example.index] || null;
+        }
+        if (!g && example) {
+          g = gl.find(x =>
+            (example.url && x.url === example.url) ||
+            (example.opponent && x.opponent === example.opponent && example.date && x.date === example.date)
+          ) || null;
+        }
+        if (!g) {
+          g = gl.find(x => x.variation === p.variation && (x._flags || []).some(f =>
+            f.ply === p.ply && f.san === p.move && f.severity === p.severity
+          )) || null;
+        }
+        if (!g) return;
+        const flag = (g._flags || []).find(f =>
+          f.ply === p.ply && f.san === p.move
+        ) || {
+          ply: p.ply,
+          san: p.move,
+          severity: p.severity,
+          loss_cp: p.avg_loss_cp,
+          best_san: p.best_san,
+        };
+        openOpeningLesson([{ game: g, flag }], 0);
+      };
       patternsEl.appendChild(card);
     }
   }
@@ -4409,7 +4671,11 @@ function appendGamesSection(lines, op) {
   }
 
   scanBtn.onclick = async () => {
-    const batch = gl.filter(g => g.san && g.san.length).slice(0, 40);
+    // When a variation line is selected, scan that line only (faster + relevant).
+    const source = activeFilter == null
+      ? gl
+      : gl.filter(g => g.variation === activeFilter);
+    const batch = source.filter(g => g.san && g.san.length).slice(0, 40);
     if (!batch.length) {
       scanStatus.textContent = "No move data to scan.";
       return;
@@ -4417,7 +4683,7 @@ function appendGamesSection(lines, op) {
     scanBtn.disabled = true;
     scanStatus.textContent = `Scanning ${batch.length} games (opening moves)\u2026`;
     try {
-      const data = await api("/api/scan-blunders", "POST", {
+      const data = await apiScanBlunders({
         games: batch.map(g => ({
           san: g.san,
           color: state.color,
@@ -4427,7 +4693,7 @@ function appendGamesSection(lines, op) {
           url: g.url,
         })),
         opening_plies: 20,
-      });
+      }, msg => { scanStatus.textContent = msg; });
       // Attach flags back onto the source game objects.
       for (const sg of data.games || []) {
         const g = batch[sg.index];
@@ -4442,8 +4708,10 @@ function appendGamesSection(lines, op) {
         ? `${withIssues} game${withIssues === 1 ? "" : "s"} with opening issues` +
           (pats.length ? ` \u00b7 ${pats.length} repeated pattern${pats.length === 1 ? "" : "s"}` : "")
         : "No opening inaccuracies found in this sample.";
-      renderPatterns(pats);
+      renderPatterns(pats, batch);
       render(activeFilter);
+      const issues = collectScanIssues(batch, data.games);
+      if (issues.length) openOpeningLesson(issues, 0);
     } catch (e) {
       if (handleProGateError(e)) {
         scanStatus.textContent = "Pro required to scan for opening mistakes.";
@@ -4493,7 +4761,9 @@ function apiUrl(path) {
 }
 
 function looksLikeProxyMiss(status, text) {
-  if (status === 404 || status === 502 || status === 503) {
+  // Include 504 — Netlify's proxy ~26s limit returns empty/HTML gateway timeouts
+  // for long Stockfish scans; treat like a broken proxy and fall back to Render.
+  if (status === 404 || status === 502 || status === 503 || status === 504) {
     const t = (text || "").trim().slice(0, 80).toLowerCase();
     if (!t || t.startsWith("<!doctype") || t.startsWith("<html") || t.startsWith("not found")) {
       return true;
@@ -4505,9 +4775,15 @@ function looksLikeProxyMiss(status, text) {
 async function readJson(resp) {
   const text = await resp.text();
   if (!text) {
+    const proxyMiss = looksLikeProxyMiss(resp.status, text);
     if (resp.status === 504) {
-      throw new Error(
-        "Gateway timed out before the server responded. Wait a moment and try again."
+      throw Object.assign(
+        new Error(
+          proxyMiss && !apiBase
+            ? "Gateway timed out (Netlify proxy). Retrying via the Render backend…"
+            : "Gateway timed out before the server responded. Wait a moment and try again."
+        ),
+        { httpStatus: resp.status, rawBody: text, isProxyMiss: proxyMiss }
       );
     }
     throw Object.assign(
@@ -4516,7 +4792,7 @@ async function readJson(resp) {
           ? `Empty response (HTTP ${resp.status}). The API may still be waking up — try again.`
           : "Empty response from server. Try again."
       ),
-      { httpStatus: resp.status, rawBody: text, isProxyMiss: looksLikeProxyMiss(resp.status, text) }
+      { httpStatus: resp.status, rawBody: text, isProxyMiss: proxyMiss }
     );
   }
   try {
@@ -5010,6 +5286,93 @@ async function api(path, method, body) {
     throw err;
   }
   return data;
+}
+
+/** Opening blunder scan — prefer async jobs (Netlify proxy times out ~26s). */
+async function apiScanBlunders(body, onStatus) {
+  await ensureApiBase();
+
+  async function startJob() {
+    const opts = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+    let resp = await fetchApi("/api/scan-blunders/jobs", opts);
+    let data;
+    try {
+      data = await readJson(resp);
+    } catch (e) {
+      if (e.isProxyMiss && !apiBase) {
+        apiBase = RENDER_API;
+        if (onStatus) onStatus("Netlify proxy timed out — using Render directly\u2026");
+        resp = await fetchApi("/api/scan-blunders/jobs", opts);
+        data = await readJson(resp);
+      } else {
+        throw e;
+      }
+    }
+    return { resp, data };
+  }
+
+  let started = null;
+  try {
+    started = await startJob();
+  } catch (e) {
+    if (e.isProxyMiss || e.httpStatus === 404 || e.httpStatus === 405) {
+      started = null; // sync fallback below
+    } else {
+      throw e;
+    }
+  }
+
+  if (started && (started.resp.status === 404 || started.resp.status === 405)) {
+    started = null;
+  } else if (started && !started.resp.ok) {
+    const err = new Error(started.data.error || `HTTP ${started.resp.status}`);
+    err.status = started.resp.status;
+    err.code = started.data.code || null;
+    throw err;
+  }
+
+  if (started && started.data.job_id) {
+    const jobId = started.data.job_id;
+    const deadline = Date.now() + 5 * 60 * 1000;
+    let dots = 0;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      dots = (dots + 1) % 4;
+      if (onStatus) onStatus("Scanning opening moves" + ".".repeat(dots));
+      let pollResp;
+      let poll;
+      try {
+        pollResp = await fetchApi(`/api/scan-blunders/jobs/${encodeURIComponent(jobId)}`);
+        poll = await readJson(pollResp);
+      } catch (e) {
+        if (e.isProxyMiss && !apiBase) {
+          apiBase = RENDER_API;
+          continue;
+        }
+        throw e;
+      }
+      if (!pollResp.ok) {
+        throw new Error(poll.error || `HTTP ${pollResp.status}`);
+      }
+      if (poll.status === "pending" || poll.status === "running") continue;
+      if (poll.status === "error") throw new Error(poll.error || "Scan failed");
+      if (poll.status === "done") return poll.result;
+      throw new Error(`Unexpected scan job status: ${poll.status}`);
+    }
+    throw new Error("Scan timed out after 5 minutes. Try fewer games.");
+  }
+
+  // Sync fallback — hit Render directly so Netlify's ~26s proxy cannot cut us off.
+  if (!apiBase && location.hostname !== "127.0.0.1" && location.hostname !== "localhost"
+      && !location.hostname.includes("onrender.com")) {
+    apiBase = RENDER_API;
+    if (onStatus) onStatus("Scanning via Render (long analysis)\u2026");
+  }
+  return api("/api/scan-blunders", "POST", body);
 }
 
 /* ---------- Intro welcome ---------- */
@@ -7119,10 +7482,10 @@ async function refreshRepSlipups() {
       }
     }
 
-    const data = await api("/api/scan-blunders", "POST", {
+    const data = await apiScanBlunders({
       games: batch,
       opening_plies: REP_SLIPUP_OPENING_PLIES,
-    });
+    }, msg => setSlipupsStatus(msg));
 
     const byPlay = {};
     for (const entry of entries) {

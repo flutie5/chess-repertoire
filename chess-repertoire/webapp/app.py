@@ -15,7 +15,9 @@ move sequence (proxied from the Lichess opening explorer, cached).
 
 POST /api/scan-blunders scans opening moves in a batch of games for
 inaccuracies/mistakes/blunders and returns per-game flags plus repeated
-patterns within the same variation.
+patterns within the same variation. Prefer POST /api/scan-blunders/jobs
+(+ GET .../jobs/<id>) behind Netlify — the sync route can exceed the
+~26s proxy timeout on larger batches.
 
 POST /api/annotate-game runs a full-game Stockfish review and returns
 chess.com-style move annotations (blunder/mistake/great/best/brilliant).
@@ -334,6 +336,25 @@ _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID = "G-147LHEVMW7"
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "").strip()
 if not GA_MEASUREMENT_ID and IS_PRODUCTION:
     GA_MEASUREMENT_ID = _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID
+
+
+def _user_account_count() -> int:
+    with _db() as conn:
+        return int(conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
+
+
+try:
+    _boot_accounts = _user_account_count()
+    print(f"[opening-explorer] user_accounts={_boot_accounts}", flush=True)
+except Exception as _boot_exc:
+    print(f"[opening-explorer] user_accounts_error={_boot_exc}", flush=True)
+if not ANALYTICS_ADMIN_EMAIL:
+    print(
+        "[opening-explorer] ANALYTICS_ADMIN_EMAIL is unset — "
+        "Admin panel (account list) is hidden for everyone. "
+        "Set it on Render to your login email.",
+        flush=True,
+    )
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -717,9 +738,18 @@ def index():
 @app.get("/api/engine-status")
 def engine_status():
     """Deploy health check: can we find/start Stockfish?"""
+    try:
+        user_accounts = _user_account_count()
+    except Exception:
+        user_accounts = None
     path = _engine_path()
     if path is None:
-        return jsonify({"ok": False, "error": "Stockfish binary not found", "path": None}), 503
+        return jsonify({
+            "ok": False,
+            "error": "Stockfish binary not found",
+            "path": None,
+            "user_accounts": user_accounts,
+        }), 503
     try:
         with _engine_lock:
             engine = _get_engine()
@@ -728,11 +758,22 @@ def engine_status():
                     "ok": False,
                     "error": "Stockfish failed to start",
                     "path": str(path),
+                    "user_accounts": user_accounts,
                 }), 503
-        return jsonify({"ok": True, "path": str(path)})
+        return jsonify({
+            "ok": True,
+            "path": str(path),
+            "user_accounts": user_accounts,
+            "admin_email_configured": bool(ANALYTICS_ADMIN_EMAIL),
+        })
     except Exception as exc:
         _reset_engine()
-        return jsonify({"ok": False, "error": str(exc), "path": str(path)}), 500
+        return jsonify({
+            "ok": False,
+            "error": str(exc),
+            "path": str(path),
+            "user_accounts": user_accounts,
+        }), 500
 
 
 @app.get("/api/eval")
@@ -893,22 +934,11 @@ def opening_lookup():
     return jsonify(result)
 
 
-@app.post("/api/scan-blunders")
-def scan_blunders():
-    """Scan opening moves of games for inaccuracies / mistakes / blunders.
-
-    Body: {
-      games: [{ san, color, variation?, opponent?, date?, url?, key? }],
-      opening_plies?: int (default 20),
-      player_only?: bool (default true — only flag the player whose color is set)
-    }
-    Caps the batch to keep Render-friendly response times.
-    Free on Analyze; My Repertoire UI is Pro-gated separately.
-    """
-    data = _json_body()
+def _parse_scan_blunders_request(data: dict) -> tuple[list, int]:
+    """Validate scan-blunders body → (games_in, opening_plies). Raises ValueError."""
     games_in = data.get("games")
     if not isinstance(games_in, list) or not games_in:
-        return jsonify({"error": "games array is required"}), 400
+        raise ValueError("games array is required")
 
     opening_plies = data.get("opening_plies") or classify.OPENING_PLIES
     try:
@@ -917,13 +947,15 @@ def scan_blunders():
         opening_plies = classify.OPENING_PLIES
 
     # Cap batch size — each game can take a few second-depth analyses.
-    MAX_BATCH = 40
-    games_in = games_in[:MAX_BATCH]
+    return games_in[:40], opening_plies
 
+
+def _run_scan_blunders(games_in: list, opening_plies: int) -> dict:
+    """Run Stockfish opening scan. Raises RuntimeError if engine missing."""
     with _engine_lock:
         engine = _get_engine()
         if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
+            raise RuntimeError("Stockfish engine not found")
 
         out_games = []
         for i, g in enumerate(games_in):
@@ -972,12 +1004,64 @@ def scan_blunders():
             out_games.append(entry)
 
     patterns = classify.find_patterns(out_games, min_count=2)
-    return jsonify({
+    return {
         "opening_plies": opening_plies,
         "scanned": len(out_games),
         "games": out_games,
         "patterns": patterns,
-    })
+    }
+
+
+@app.post("/api/scan-blunders")
+def scan_blunders():
+    """Scan opening moves of games for inaccuracies / mistakes / blunders.
+
+    Body: {
+      games: [{ san, color, variation?, opponent?, date?, url?, key? }],
+      opening_plies?: int (default 20),
+      player_only?: bool (default true — only flag the player whose color is set)
+    }
+    Caps the batch to keep Render-friendly response times.
+    Prefer POST /api/scan-blunders/jobs when behind Netlify (~26s proxy limit).
+    Free on Analyze; My Repertoire UI is Pro-gated separately.
+    """
+    data = _json_body()
+    try:
+        games_in, opening_plies = _parse_scan_blunders_request(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    try:
+        return jsonify(_run_scan_blunders(games_in, opening_plies))
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+
+
+@app.post("/api/scan-blunders/jobs")
+def start_scan_blunders_job():
+    """Start an async opening-blunder scan (avoids Netlify ~26s proxy timeout)."""
+    data = _json_body()
+    try:
+        games_in, opening_plies = _parse_scan_blunders_request(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Capture lists for the worker thread (request body is gone after return).
+    job_id = _start_report_job(lambda: _run_scan_blunders(list(games_in), opening_plies))
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+
+@app.get("/api/scan-blunders/jobs/<job_id>")
+def poll_scan_blunders_job(job_id: str):
+    with _report_jobs_lock:
+        job = _report_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "job not found or expired"}), 404
+    status = job["status"]
+    if status == "done":
+        return jsonify({"status": "done", "result": job["result"]})
+    if status == "error":
+        return jsonify({"status": "error", "error": job.get("error", "unknown")})
+    return jsonify({"status": status})
 
 
 @app.post("/api/annotate-game")
