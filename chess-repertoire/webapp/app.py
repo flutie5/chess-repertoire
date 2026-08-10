@@ -1738,10 +1738,12 @@ def _json_body() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _login_user(user: sqlite3.Row) -> dict:
+def _login_user(user: sqlite3.Row, *, is_new_account: bool = False) -> dict:
     session.permanent = True
     session["user_id"] = user["id"]
-    return _user_payload(user)
+    payload = _user_payload(user)
+    payload["is_new_account"] = is_new_account
+    return payload
 
 
 # Google ID tokens for interactive sign-in should be fresh (GIS issues short-lived JWTs).
@@ -1892,9 +1894,8 @@ def auth_google():
                     "SELECT * FROM users WHERE id = ?", (user["id"],)
                 ).fetchone()
 
-    payload = _login_user(user)
-    payload["is_new_account"] = is_new_account
-    return jsonify(payload)
+    return jsonify(_login_user(user, is_new_account=is_new_account))
+
 
 @app.post("/api/register")
 def register():
@@ -1922,7 +1923,7 @@ def register():
     except sqlite3.IntegrityError:
         return jsonify({"error": "An account with that email already exists."}), 409
 
-    return jsonify(_login_user(user)), 201
+    return jsonify(_login_user(user, is_new_account=True)), 201
 
 
 @app.post("/api/login")
