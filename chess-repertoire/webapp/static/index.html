@@ -328,37 +328,81 @@
   .sq.hl-brilliant::after { background: var(--hl-brilliant); }
   .sq.hl-best::after { background: var(--hl-best); }
   .sq.sel::after { content: ""; position: absolute; inset: 0; background: var(--hl); }
+  /* Chess.com-style check: red radial on the checked king */
+  .sq.check::after {
+    content: ""; position: absolute; inset: 0; z-index: 0;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(255, 0, 0, 0.72) 0%,
+      rgba(231, 0, 0, 0.45) 40%,
+      rgba(169, 0, 0, 0.2) 70%,
+      transparent 100%
+    );
+  }
+  .sq.drag-over::after {
+    content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.18); z-index: 0;
+  }
+  .sq.premove-from::after,
+  .sq.premove-to::after {
+    content: ""; position: absolute; inset: 0; background: rgba(30, 120, 180, 0.45); z-index: 0;
+  }
   .sq.dest::before {
-    content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%;
-    background: rgba(0, 0, 0, 0.22); z-index: 2; pointer-events: none;
+    content: ""; position: absolute; width: 33%; height: 33%; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.14); z-index: 2; pointer-events: none;
   }
   .sq.dest.capture::before {
     width: 100%; height: 100%; background: transparent;
-    border: 6px solid rgba(0, 0, 0, 0.22); border-radius: 50%;
+    border: 0.42em solid rgba(0, 0, 0, 0.14); border-radius: 50%;
+    box-sizing: border-box;
+  }
+  .sq.dest.premove-dest::before {
+    background: rgba(30, 120, 180, 0.35);
+  }
+  .sq.dest.capture.premove-dest::before {
+    background: transparent;
+    border-color: rgba(30, 120, 180, 0.45);
   }
   .sq.movable { cursor: grab; }
   .sq.dest { cursor: pointer; }
   .sq img.piece {
-    width: 92%; height: 92%; z-index: 1; pointer-events: none;
+    width: 100%; height: 100%; z-index: 1; pointer-events: none;
     image-rendering: -webkit-optimize-contrast;
   }
-  .sq img.piece.dragging { opacity: 0.35; }
+  .sq img.piece.dragging { opacity: 0.3; }
+  .sq img.piece.anim-hide { opacity: 0; }
   #drag-ghost {
     position: fixed; z-index: 100; pointer-events: none;
     will-change: left, top;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.35));
+  }
+  #piece-fly {
+    position: fixed; z-index: 90; pointer-events: none;
+    will-change: left, top;
+  }
+  #draw-layer {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 4;
+  }
+  #promo-shade {
+    position: absolute; inset: 0; z-index: 40;
+    background: rgba(0, 0, 0, 0.45); pointer-events: auto;
   }
   #promo-picker {
     position: absolute; z-index: 50; display: flex; flex-direction: column;
-    background: var(--bg-card); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm); overflow: hidden;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+    background: #fff; overflow: hidden;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    width: 12.5%; /* one file */
   }
+  #promo-picker.promo-up { flex-direction: column; }
+  #promo-picker.promo-down { flex-direction: column-reverse; }
   #promo-picker button {
-    background: none; border: 0; padding: 4px; cursor: pointer; line-height: 0;
+    background: #fff; border: 0; padding: 0; cursor: pointer; line-height: 0;
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    width: 100%;
   }
-  #promo-picker button:hover { background: var(--bg-card-hover); }
-  #promo-picker img { width: 52px; height: 52px; }
-  .sq .coord { position: absolute; font-size: 11px; font-weight: 700; z-index: 1; }
+  #promo-picker button:hover { background: #e8e8e8; }
+  #promo-picker img { width: 88%; height: 88%; }
+  .sq .coord { position: absolute; font-size: 11px; font-weight: 700; z-index: 1; pointer-events: none; }
   .sq.light .coord { color: var(--board-dark); }
   .sq.dark .coord { color: var(--board-light); }
   .coord.file { right: 4px; bottom: 2px; }
@@ -1902,26 +1946,41 @@ function truncateToPly() {
   rebuildDerived();
 }
 
-function makeUserMove(from, to, promotion) {
+function makeUserMove(from, to, promotion, opts = {}) {
   if (state.editMode || freeFen) return false;
   if (state.ply < state.sans.length) {
     truncateToPly();
     clearExploreAnnsFrom(state.ply + 1);
   }
   const fenBefore = currentFen();
+  let played;
   try {
-    game.move({ from, to, promotion });
+    played = game.move({ from, to, promotion });
   } catch (e) {
     return false;
   }
+  if (!played) return false;
   rebuildDerived();
   state.ply = state.sans.length;
   clearExploreAnnsFrom(state.ply);
-  refreshBoard();
-  if (!isMainLinePly(state.ply)) {
-    scheduleExploreAnnotate(state.ply, fenBefore, state.sans[state.ply - 1]);
+  clearUserShapes();
+  const animate = opts.animate !== false && !opts.viaDrag;
+  const finish = () => {
+    playMoveSound(played, currentFen());
+    if (!isMainLinePly(state.ply)) {
+      scheduleExploreAnnotate(state.ply, fenBefore, state.sans[state.ply - 1]);
+    }
+    if (state.practiceMode) {
+      updatePracticeGameStatus();
+      schedulePracticeReply();
+    }
+  };
+  if (animate) {
+    animateThenRefresh(played, finish);
+  } else {
+    refreshBoard();
+    finish();
   }
-  if (state.practiceMode) schedulePracticeReply();
   return true;
 }
 
@@ -2397,8 +2456,10 @@ function refreshBoard() {
     if (mv?.from && mv?.to) hl = new Set([mv.from, mv.to]);
     hlSeverity = annotationAtPly(state.ply)?.severity || null;
   }
-  clearSelection();
+  clearSelection({ keepPremove: true, keepShapes: true });
   renderBoard(currentFen(), state.orientation, hl, hlSeverity);
+  applyCheckHighlight();
+  applyPremoveHighlight();
   markMovablePieces();
   renderMoveList();
   renderMaterial();
@@ -2406,6 +2467,7 @@ function refreshBoard() {
   scheduleOpeningTitle();
   scheduleEval();
   if (state.repertoireOpen) updateRepTreeActive();
+  renderUserShapes();
 }
 
 /* ---------- dynamic opening title ---------- */
