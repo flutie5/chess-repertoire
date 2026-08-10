@@ -63,6 +63,23 @@ Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom
 
 Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 
+### Google Analytics (GA4) setup
+
+The self-hosted "Site visits" admin panel (Profile page) is fine for a quick
+glance, but for full traffic/audience reporting like major sites use, wire up
+Google Analytics:
+
+1. [Google Analytics](https://analytics.google.com) → Admin → create a GA4
+   property → add a **Web** data stream for your site URL.
+2. Copy the **Measurement ID** (looks like `G-XXXXXXXXXX`).
+3. Set it as `GA_MEASUREMENT_ID` on Render (Environment tab) and redeploy.
+4. Visit the live site once (not logged in as the `ANALYTICS_ADMIN_EMAIL`
+   account — that account is excluded, same as the self-hosted stats) and
+   check **Reports → Realtime** in GA to confirm the hit shows up.
+
+No code changes needed — the frontend only loads `gtag.js` when
+`GA_MEASUREMENT_ID` is configured, so local/dev runs never send data to Google.
+
 ## 3. Deploy the frontend on Netlify
 
 1. Netlify Dashboard → **Add new site** → **Import an existing project**

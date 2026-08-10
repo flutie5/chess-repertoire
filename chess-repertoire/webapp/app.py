@@ -322,6 +322,9 @@ _init_db()
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 ANALYTICS_ADMIN_EMAIL = os.environ.get("ANALYTICS_ADMIN_EMAIL", "").strip().lower()
+# Google Analytics (GA4) measurement ID, e.g. "G-XXXXXXXXXX". Optional — when
+# unset, gtag.js is never loaded (no third-party tracking in local/dev).
+GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "").strip()
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -1736,6 +1739,7 @@ def _login_user(user: sqlite3.Row) -> dict:
 def auth_config():
     return jsonify({
         "google_client_id": GOOGLE_CLIENT_ID or None,
+        "ga_measurement_id": GA_MEASUREMENT_ID or None,
     })
 
 
