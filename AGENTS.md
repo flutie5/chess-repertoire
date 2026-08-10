@@ -40,12 +40,14 @@ is also a CLI (`chess-repertoire/build_repertoire.py`). See
   app runs fully; email/password registration still works, and Pro gates are disabled.
 - Local state lives in `webapp/users.db` (SQLite) and `webapp/.secret_key`, both
   gitignored and created on first run.
-- Google Analytics (GA4) support exists for full traffic/audience reporting: set
-  `GA_MEASUREMENT_ID` (a `G-XXXXXXXXXX` id from a GA4 property's web data stream)
-  and the frontend dynamically loads `gtag.js` — see `DEPLOY.md` → "Google
-  Analytics (GA4) setup". Unset by default, so no third-party script loads
-  during local dev/tests. The frontend fetches this (and `google_client_id`)
-  from `GET /api/auth/config` via the shared `fetchSiteConfig()` cache in
-  `webapp/static/index.html`. There is also a separate, self-hosted "Site
-  visits" panel gated by `ANALYTICS_ADMIN_EMAIL` (Profile page, admin-only) —
-  both exclude the analytics-admin account's own visits.
+- Google Analytics (GA4) support exists for full traffic/audience reporting —
+  see `DEPLOY.md` → "Google Analytics (GA4) setup". The production Measurement
+  ID is baked into `webapp/app.py` as `_DEFAULT_PRODUCTION_GA_MEASUREMENT_ID`
+  and only takes effect when `FLASK_ENV=production`; local dev/tests never load
+  `gtag.js` unless `GA_MEASUREMENT_ID` is explicitly set (e.g. to test against a
+  separate GA4 property). The frontend fetches the effective ID (and
+  `google_client_id`) from `GET /api/auth/config` via the shared
+  `fetchSiteConfig()` cache in `webapp/static/index.html`, then loads `gtag.js`
+  dynamically. There is also a separate, self-hosted "Site visits" panel gated
+  by `ANALYTICS_ADMIN_EMAIL` (Profile page, admin-only) — both exclude the
+  analytics-admin account's own visits.

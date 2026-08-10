@@ -322,9 +322,16 @@ _init_db()
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 ANALYTICS_ADMIN_EMAIL = os.environ.get("ANALYTICS_ADMIN_EMAIL", "").strip().lower()
-# Google Analytics (GA4) measurement ID, e.g. "G-XXXXXXXXXX". Optional — when
-# unset, gtag.js is never loaded (no third-party tracking in local/dev).
+# Google Analytics (GA4) measurement ID, e.g. "G-XXXXXXXXXX". Not a secret —
+# it's meant to be public (visible in every visitor's page source) — so the
+# production ID is baked in as a default here rather than requiring a Render
+# dashboard step. Only used when FLASK_ENV=production, so local dev never
+# reports to the real GA4 property; set GA_MEASUREMENT_ID explicitly to
+# override (e.g. to test against a separate/staging GA4 property).
+_DEFAULT_PRODUCTION_GA_MEASUREMENT_ID = "G-147LHEVMW7"
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "").strip()
+if not GA_MEASUREMENT_ID and IS_PRODUCTION:
+    GA_MEASUREMENT_ID = _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
