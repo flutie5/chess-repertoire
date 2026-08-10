@@ -4526,7 +4526,7 @@ async function readJson(resp) {
     if (resp.status === 405) {
       message = "Server rejected the request (HTTP 405). Hard-refresh the page (Ctrl+F5) and try again.";
     } else if (looksLikeProxyMiss(resp.status, text)) {
-      message = "API proxy returned 404. Retrying via the Render backend…";
+      message = `API proxy unavailable (HTTP ${resp.status}).`;
     } else if (resp.status === 500) {
       message = "Engine server error (HTTP 500). If this persists after a Render redeploy, check /api/engine-status.";
     } else {
@@ -4983,12 +4983,26 @@ function closeProfile() {
 
 async function api(path, method, body) {
   await ensureApiBase();
-  const resp = await fetchApi(path, {
+  const opts = {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await readJson(resp);
+  };
+  let resp = await fetchApi(path, opts);
+  let data;
+  try {
+    data = await readJson(resp);
+  } catch (e) {
+    // Netlify proxy miss / HTML error page — retry once against Render
+    // (same path as fetchEval / runReport; scan-blunders uses this helper).
+    if (e.isProxyMiss && !apiBase) {
+      apiBase = RENDER_API;
+      resp = await fetchApi(path, opts);
+      data = await readJson(resp);
+    } else {
+      throw e;
+    }
+  }
   if (!resp.ok) {
     const err = new Error(data.error || `HTTP ${resp.status}`);
     err.status = resp.status;
