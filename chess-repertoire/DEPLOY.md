@@ -72,6 +72,25 @@ python -m pytest tests/test_auth_google.py -v
 
 Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 
+### Google Analytics (GA4) setup
+
+The self-hosted "Site visits" admin panel (Profile page) is fine for a quick
+glance, but for full traffic/audience reporting like major sites use, this app
+also reports to Google Analytics.
+
+The production Measurement ID (`G-147LHEVMW7`, from a GA4 property → Web data
+stream) is already baked into `webapp/app.py` as the default used whenever
+`FLASK_ENV=production` — **no Render dashboard step is required**. Local/dev
+runs (`FLASK_ENV` unset) never report to it, so testing never pollutes real
+traffic data.
+
+- To point at a **different** GA4 property (e.g. your own, or a staging
+  property), set `GA_MEASUREMENT_ID` on Render (Environment tab) to override
+  the default, then redeploy.
+- To verify: visit the live site once (not logged in as the
+  `ANALYTICS_ADMIN_EMAIL` account — that account is excluded, same as the
+  self-hosted stats) and check **Reports → Realtime** in GA.
+
 ## 3. Deploy the frontend on Netlify
 
 1. Netlify Dashboard → **Add new site** → **Import an existing project**

@@ -151,6 +151,359 @@
     #sidebar-resize { display: none; }
   }
 
+  /* Mobile board toggle — desktop hidden */
+  #board-toggle-btn,
+  #mobile-insights { display: none; }
+
+  /* ---- Mobile-first insights layout ---- */
+  @media (max-width: 720px) {
+    body {
+      font-size: 15px;
+      /* Avoid iOS rubber-band covering sticky controls awkwardly */
+      overscroll-behavior-y: contain;
+    }
+    header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 12px 14px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: var(--bg-card);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 17px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      width: 100%;
+    }
+    .controls input[type=text] {
+      width: 100%;
+      min-width: 0;
+      padding: 12px 12px;
+      font-size: 16px; /* prevents iOS zoom */
+    }
+    .controls button.primary {
+      padding: 12px 16px;
+      font-size: 15px;
+    }
+    #status {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .auth-area {
+      margin-left: 0;
+      width: 100%;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .auth-area button {
+      min-height: 40px;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px 12px 28px;
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+    }
+
+    /* Insights / username flow first; board only when requested */
+    #analyze-sidebar { order: 1; width: 100%; padding-top: 0 !important; }
+    #repertoire-sidebar { order: 1; width: 100%; }
+    #repertoire-practice { order: 2; width: 100%; }
+    .board-panel {
+      order: 0;
+      width: 100%;
+      /* Fit an iPhone-width viewport; JS may set the same value on resize */
+      --board-px: min(100vw - 56px, 100dvw - 56px, 360px);
+      gap: 8px;
+      max-width: 100%;
+      overflow: hidden;
+      align-items: center;
+    }
+    .board-panel .board-row,
+    .board-panel #line-title,
+    .board-panel .material-tray,
+    .board-panel .player-strip,
+    .board-panel .nav,
+    .board-panel #engine-panel,
+    .board-panel #line-moves,
+    .board-panel .piece-bank,
+    .board-panel .edit-tools {
+      width: min(calc(var(--board-px) + 30px), 100%) !important;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    #board {
+      width: var(--board-px) !important;
+      height: var(--board-px) !important;
+      max-width: calc(100vw - 56px);
+      max-height: calc(100vw - 56px);
+    }
+    #evalbar {
+      height: var(--board-px) !important;
+    }
+
+    /* Board hidden by default on mobile — insights are the home screen */
+    body:not(.show-board):not(.game-view):not(.repertoire-open):not(.edit-mode):not(.practice-mode) .board-panel {
+      display: none;
+    }
+    body.show-board .board-panel,
+    body.game-view .board-panel,
+    body.repertoire-open .board-panel,
+    body.edit-mode .board-panel,
+    body.practice-mode .board-panel {
+      display: flex;
+    }
+
+    #board-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      margin: 0 0 4px;
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #board-toggle-btn:hover { border-color: var(--green); color: var(--text-primary); }
+    body.show-board #board-toggle-btn,
+    body.game-view #board-toggle-btn {
+      border-color: var(--green);
+      background: var(--green-soft);
+      color: var(--text-primary);
+    }
+    body.game-view #board-toggle-btn { display: none; }
+
+    #mobile-insights {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      margin: 2px 0 4px;
+    }
+    #mobile-insights.has-data { display: flex; }
+    .insights-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .insight-stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 10px 8px;
+      text-align: center;
+    }
+    .insight-stat .val {
+      display: block;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+    .insight-stat .lbl {
+      display: block;
+      margin-top: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .insights-section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 2px 2px 0;
+    }
+    .insights-priorities {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .priority-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      text-align: left;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      color: inherit;
+    }
+    .priority-card:hover,
+    .priority-card:active {
+      background: var(--bg-card-hover);
+      border-color: var(--green);
+    }
+    .priority-card .pc-body { flex: 1; min-width: 0; }
+    .priority-card .pc-name {
+      display: block;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .priority-card .pc-meta {
+      display: block;
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .priority-card .pc-gap {
+      flex: none;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--loss-red);
+      white-space: nowrap;
+    }
+    .priority-card .pc-color {
+      flex: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid var(--border-subtle);
+    }
+    .priority-card .pc-color.white { background: #f0f0f0; }
+    .priority-card .pc-color.black { background: #1a1a1a; }
+    .insights-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      padding: 0 2px;
+    }
+
+    #analyze-sidebar .sidebar-filters {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--bg-page);
+      padding-bottom: 4px;
+    }
+    .tc-group label,
+    .color-tabs button,
+    .sort-tabs button,
+    #range-btn {
+      min-height: 42px;
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+    #summary {
+      font-size: 13px;
+      padding: 4px 2px;
+    }
+    #openings {
+      max-height: none;
+      overflow: visible;
+      padding-right: 0;
+      gap: 10px;
+    }
+    .opening-head {
+      padding: 14px 14px;
+      gap: 12px;
+      min-height: 52px;
+    }
+    .opening-head .name { font-size: 15px; }
+    .opening-head .meta {
+      font-size: 12px;
+      white-space: normal;
+      text-align: right;
+      max-width: 42%;
+    }
+    .line {
+      padding: 12px 14px 12px 28px;
+      font-size: 14px;
+      min-height: 44px;
+      align-items: center;
+    }
+    .game-row {
+      padding: 12px 14px 12px 28px;
+      min-height: 48px;
+      font-size: 14px;
+    }
+    .scan-row {
+      padding: 12px 14px;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .scan-row button {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .patterns .pattern {
+      padding: 10px 12px;
+    }
+    .empty-note {
+      padding: 32px 18px;
+    }
+    .empty-note strong { font-size: 16px; }
+    .empty-note p { font-size: 14px; }
+
+    /* Hide desktop-only chrome that crowds small screens */
+    #board-resize { display: none; }
+    #line-moves { max-width: 100%; }
+    #line-title,
+    .material-tray,
+    .player-strip {
+      width: calc(var(--board-px) + 30px);
+      max-width: 100%;
+    }
+    body.game-view #close-game-btn {
+      width: 100%;
+      min-height: 44px;
+      margin: 0;
+    }
+    body.game-view #analyze-sidebar {
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible;
+    }
+    body.game-view #game-panel {
+      min-height: 280px;
+    }
+    body.game-view #game-moves {
+      max-height: min(50vh, 360px);
+    }
+
+    /* Intro modal: keep brand first but tighter on phones */
+    #intro-modal .modal { width: min(94vw, 400px); padding: 22px 18px; }
+    #intro-modal .intro-brand { font-size: 24px; }
+    #intro-modal .intro-headline { font-size: 22px; }
+  }
+
   /* ---- board ---- */
   .board-panel {
     --board-px: 560px;
@@ -497,7 +850,9 @@
   body.game-view #analyze-sidebar .sidebar-filters,
   body.game-view #summary,
   body.game-view #opening-sort,
-  body.game-view #openings { display: none !important; }
+  body.game-view #openings,
+  body.game-view #mobile-insights,
+  body.game-view #board-toggle-btn { display: none !important; }
   body.game-view #game-panel { display: flex; }
   body.game-view #analyze-sidebar {
     display: flex;
@@ -759,6 +1114,8 @@
   .sort-tabs {
     display: flex; gap: 6px; margin: 0;
   }
+  .sort-tabs[hidden] { display: none !important; }
+  #mobile-insights:not(.has-data) { display: none !important; }
   .sort-tabs button {
     flex: 1; background: var(--bg-card); color: var(--text-secondary);
     border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
@@ -863,6 +1220,15 @@
     padding: 5px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
   }
   .scan-row button:hover { border-color: var(--green); }
+  .scan-row button.pulse-hint {
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px var(--green-soft);
+    animation: scan-pulse 1.2s ease 0s 2;
+  }
+  @keyframes scan-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--green-soft); }
+    50% { box-shadow: 0 0 0 4px var(--green-soft-3); }
+  }
   .scan-row button:disabled { opacity: .5; cursor: default; }
   .scan-row .scan-status { font-size: 12px; color: var(--text-muted); }
   .patterns {
@@ -1799,6 +2165,9 @@
   </section>
 
   <aside class="sidebar" id="analyze-sidebar">
+    <button type="button" id="board-toggle-btn" aria-pressed="false" title="Show or hide the analysis board">
+      Show analysis board
+    </button>
     <div class="sidebar-filters" id="sidebar-filters">
       <div class="tc-group" id="tc-group" role="group" aria-label="Time controls">
         <label title="Include rapid games"><input type="checkbox" value="rapid" checked>Rapid</label>
@@ -1832,6 +2201,7 @@
       </div>
     </div>
     <button type="button" id="close-game-btn" title="Return to opening list">Close game</button>
+    <div id="mobile-insights" aria-live="polite"></div>
     <div id="summary" aria-live="polite"></div>
     <div class="sort-tabs" id="opening-sort" hidden role="group" aria-label="Sort openings">
       <button type="button" data-sort="frequent" class="active" title="Sort by how often you play each opening">Most played</button>
@@ -2998,7 +3368,10 @@ function setGameView(on, game) {
     const title = g?.variation || state.lastOpeningName || "Game";
     if (gameOpeningTitleEl) gameOpeningTitleEl.textContent = title;
     if (titleEl) titleEl.textContent = title;
+    // Game review needs the board on mobile.
+    if (isMobileLayout()) setShowBoard(true);
   }
+  syncBoardToggleBtn();
   renderMoveList();
   requestAnimationFrame(syncSidebarToBoard);
 }
@@ -3008,6 +3381,8 @@ function closeGameView() {
   setGameAnalyzeStatus("");
   setGameView(false);
   clearBoardPlayers();
+  // Return mobile users to insights — board stays optional.
+  if (isMobileLayout()) setShowBoard(false);
   // Keep current board position; user can keep analyzing or pick another opening.
   renderMoveList();
   requestAnimationFrame(syncSidebarToBoard);
@@ -3166,19 +3541,39 @@ const BOARD_PX_MAX = 960;
 const boardPanel = document.querySelector(".board-panel");
 const boardResize = document.getElementById("board-resize");
 
+function mobileBoardPx() {
+  // Leave room for page padding + eval bar so the square fits an iPhone width.
+  const avail = Math.min(window.innerWidth, window.visualViewport?.width || window.innerWidth) - 56;
+  return Math.round(Math.max(220, Math.min(avail, 360)));
+}
+
 function applyBoardPx(px) {
-  const max = Math.min(BOARD_PX_MAX, Math.max(BOARD_PX_MIN, window.innerWidth - 48));
-  px = Math.round(Math.min(max, Math.max(BOARD_PX_MIN, px)));
+  if (!boardPanel) return px;
+  const mobile = window.matchMedia("(max-width: 720px)").matches;
+  if (mobile) {
+    // Ignore desktop-saved board size — always fit the phone viewport.
+    px = mobileBoardPx();
+    boardPanel.style.setProperty("--board-px", px + "px");
+    requestAnimationFrame(syncSidebarToBoard);
+    return px;
+  }
+  const minPx = BOARD_PX_MIN;
+  const max = Math.min(BOARD_PX_MAX, Math.max(minPx, window.innerWidth - 48));
+  px = Math.round(Math.min(max, Math.max(minPx, px)));
   boardPanel.style.setProperty("--board-px", px + "px");
   requestAnimationFrame(syncSidebarToBoard);
   return px;
 }
 
 function syncHeaderToEvalbar() {
-  // Flush "Opening Explorer" with the left edge of the eval bar.
+  // Flush "Opening Explorer" with the left edge of the eval bar (desktop only).
   const evalbar = document.getElementById("evalbar");
   const header = document.querySelector("header");
   if (!evalbar || !header) return;
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    header.style.paddingLeft = "";
+    return;
+  }
   const left = Math.round(evalbar.getBoundingClientRect().left);
   header.style.paddingLeft = (left > 8 ? left : 22) + "px";
 }
@@ -3191,7 +3586,12 @@ function syncSidebarToBoard() {
 
   if (document.body.classList.contains("game-view")) {
     sidebar.style.removeProperty("--sidebar-align-pad");
-    // Cap the moves panel to the board column height so long games scroll in-place.
+    // Desktop: cap moves panel to board column height. Mobile stacks, so let the page scroll.
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      sidebar.style.removeProperty("height");
+      sidebar.style.removeProperty("max-height");
+      return;
+    }
     const h = Math.round(boardPanel.getBoundingClientRect().height);
     if (h > 0) {
       sidebar.style.height = h + "px";
@@ -3223,6 +3623,7 @@ function initBoardResize() {
 
   let startX = 0, startY = 0, startPx = 560;
   boardResize.addEventListener("pointerdown", e => {
+    if (window.matchMedia("(max-width: 720px)").matches) return;
     e.preventDefault();
     boardResize.setPointerCapture(e.pointerId);
     startX = e.clientX;
@@ -3238,12 +3639,31 @@ function initBoardResize() {
   boardResize.addEventListener("pointerup", e => {
     if (!boardResize.hasPointerCapture(e.pointerId)) return;
     boardResize.releasePointerCapture(e.pointerId);
+    if (window.matchMedia("(max-width: 720px)").matches) return;
     const px = parseFloat(getComputedStyle(boardPanel).getPropertyValue("--board-px")) || 560;
     localStorage.setItem(BOARD_PX_LS, String(Math.round(px)));
   });
 }
 initBoardResize();
-window.addEventListener("resize", () => requestAnimationFrame(syncSidebarToBoard));
+
+function onViewportChange() {
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    applyBoardPx(mobileBoardPx());
+  }
+  requestAnimationFrame(syncSidebarToBoard);
+}
+window.addEventListener("resize", onViewportChange);
+window.visualViewport?.addEventListener("resize", onViewportChange);
+window.matchMedia("(max-width: 720px)").addEventListener("change", ev => {
+  if (ev.matches) {
+    applyBoardPx(mobileBoardPx());
+  } else {
+    const saved = Number(localStorage.getItem(BOARD_PX_LS));
+    applyBoardPx(Number.isFinite(saved) && saved > 0 ? saved : 560);
+    document.body.classList.remove("show-board");
+  }
+  syncBoardToggleBtn();
+});
 if (typeof ResizeObserver !== "undefined" && boardPanel) {
   const boardAlignRo = new ResizeObserver(() => requestAnimationFrame(syncSidebarToBoard));
   boardAlignRo.observe(boardPanel);
@@ -3387,6 +3807,8 @@ function loadLine(line, openingName) {
   state.lastOpeningName = line.name || null;
   clearBoardPlayers();
   setGameView(false);
+  // On mobile, reveal the board when the user picks a line to study.
+  if (isMobileLayout()) setShowBoard(true);
   // Provisional title; scheduleOpeningTitle() refines it move-by-move.
   titleEl.textContent = line.name || "Starting position";
   clearGamesFilters();
@@ -3397,6 +3819,9 @@ function loadLine(line, openingName) {
     if (cont && cont._renderGames) cont._renderGames(line.name);
   }
   animateLine();   // paints the start position, then replays the whole variation
+  if (isMobileLayout()) {
+    document.querySelector(".board-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function loadGameReplay(g) {
@@ -3422,9 +3847,13 @@ function loadGameReplay(g) {
   state.lastOpeningName = g.variation || null;
   titleEl.textContent = g.variation || "Starting position";
   setBoardPlayersFromGame(g);
+  if (isMobileLayout()) setShowBoard(true);
   setGameView(true, g);
   // Keep any variation filter/highlight: the user is browsing that list.
   animateLine(GAME_PREVIEW_PLIES);
+  if (isMobileLayout()) {
+    document.querySelector(".board-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   // Full-game chess.com-style review (ignore stale if user opens another game).
   const token = ++gameAnnotateToken;
@@ -3443,6 +3872,127 @@ function loadGameReplay(g) {
 
 const openingsEl = document.getElementById("openings");
 const summaryEl = document.getElementById("summary");
+const mobileInsightsEl = document.getElementById("mobile-insights");
+const boardToggleBtn = document.getElementById("board-toggle-btn");
+const MOBILE_MQ = window.matchMedia("(max-width: 720px)");
+
+function isMobileLayout() {
+  return MOBILE_MQ.matches;
+}
+
+function setShowBoard(on) {
+  document.body.classList.toggle("show-board", !!on);
+  syncBoardToggleBtn();
+  if (on) requestAnimationFrame(() => {
+    // Board may have been display:none — force a paint/layout pass.
+    refreshBoard();
+    syncSidebarToBoard();
+  });
+}
+
+function syncBoardToggleBtn() {
+  if (!boardToggleBtn) return;
+  const shown = document.body.classList.contains("show-board") ||
+    document.body.classList.contains("game-view");
+  boardToggleBtn.setAttribute("aria-pressed", shown ? "true" : "false");
+  boardToggleBtn.textContent = shown ? "Hide analysis board" : "Show analysis board";
+}
+
+function focusOpeningFromPriority(color, openingName) {
+  if (color && color !== state.color) setColor(color);
+  else renderSidebar();
+  requestAnimationFrame(() => {
+    const box = openingsEl.querySelector(`.opening[data-opening="${CSS.escape(openingName)}"]`);
+    if (!box) return;
+    box.classList.add("open");
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Nudge user toward blunder scan on mobile.
+    const scanBtn = box.querySelector(".scan-row button");
+    if (scanBtn && isMobileLayout()) {
+      scanBtn.classList.add("pulse-hint");
+      setTimeout(() => scanBtn.classList.remove("pulse-hint"), 2400);
+    }
+  });
+}
+
+function renderMobileInsights() {
+  if (!mobileInsightsEl) return;
+  mobileInsightsEl.innerHTML = "";
+  mobileInsightsEl.classList.remove("has-data");
+  if (!state.report) return;
+
+  const white = state.report.white;
+  const black = state.report.black;
+  const games = state.report.analyzed_games || 0;
+  const wScore = white?.score;
+  const bScore = black?.score;
+
+  const stats = document.createElement("div");
+  stats.className = "insights-stats";
+  stats.innerHTML =
+    `<div class="insight-stat"><span class="val">${games}</span><span class="lbl">Games</span></div>` +
+    `<div class="insight-stat"><span class="val">${wScore != null ? wScore + "%" : "—"}</span><span class="lbl">As White</span></div>` +
+    `<div class="insight-stat"><span class="val">${bScore != null ? bScore + "%" : "—"}</span><span class="lbl">As Black</span></div>`;
+  mobileInsightsEl.appendChild(stats);
+
+  const priorities = (state.report.priorities || []).slice(0, 5);
+  if (priorities.length) {
+    const lab = document.createElement("div");
+    lab.className = "insights-section-label";
+    lab.textContent = "Focus areas — underperforming openings";
+    mobileInsightsEl.appendChild(lab);
+
+    const list = document.createElement("div");
+    list.className = "insights-priorities";
+    for (const p of priorities) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "priority-card";
+      card.title = `Open ${p.opening} (${p.color})`;
+      card.innerHTML =
+        `<span class="pc-color ${p.color === "black" ? "black" : "white"}" aria-hidden="true"></span>` +
+        `<span class="pc-body">` +
+          `<span class="pc-name"></span>` +
+          `<span class="pc-meta"></span>` +
+        `</span>` +
+        `<span class="pc-gap"></span>`;
+      card.querySelector(".pc-name").textContent = p.opening;
+      card.querySelector(".pc-meta").textContent =
+        `${p.color === "black" ? "As Black" : "As White"} · ${p.frequency_pct}% of games · ${p.score}% score`;
+      card.querySelector(".pc-gap").textContent =
+        p.score_gap > 0 ? `−${p.score_gap} pts` : `${p.score_gap} pts`;
+      card.onclick = () => focusOpeningFromPriority(p.color, p.opening);
+      list.appendChild(card);
+    }
+    mobileInsightsEl.appendChild(list);
+
+    const hint = document.createElement("p");
+    hint.className = "insights-hint";
+    hint.textContent =
+      "Tap a focus area, then Scan opening for blunders to see repeated early mistakes in your recent games.";
+    mobileInsightsEl.appendChild(hint);
+  } else {
+    const hint = document.createElement("p");
+    hint.className = "insights-hint";
+    hint.textContent =
+      "Browse openings below for history and scores. Open one and scan for blunders to surface repeated early mistakes.";
+    mobileInsightsEl.appendChild(hint);
+  }
+
+  mobileInsightsEl.classList.add("has-data");
+}
+
+if (boardToggleBtn) {
+  boardToggleBtn.addEventListener("click", () => {
+    const next = !document.body.classList.contains("show-board");
+    setShowBoard(next);
+    if (next && isMobileLayout()) {
+      applyBoardPx(mobileBoardPx());
+      document.querySelector(".board-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+syncBoardToggleBtn();
 
 /** Black-defense family names (ECO naming) — still White games when you face them. */
 function isDefenseFamily(name) {
@@ -3529,6 +4079,7 @@ function sortedVariations(op) {
 function appendOpeningBox(op, displayName) {
   const box = document.createElement("div");
   box.className = "opening";
+  box.dataset.opening = op.name || "";
 
   const last = openingLastPlayed(op);
   const metaExtra = state.openingSort === "recent" && last
@@ -3611,6 +4162,7 @@ function setOpeningSort(mode) {
 
 function renderSidebar() {
   openingsEl.innerHTML = "";
+  renderMobileInsights();
   if (!state.report) {
     const readyHint = currentUser
       ? "Link your chess.com or lichess username in Profile, then click <kbd>Analyze my games</kbd>."
@@ -4316,6 +4868,14 @@ let googleNonce = "";
 let googleIdentityReady = false;
 let googleSignInBusy = false;
 let googleWarmupPromise = null;
+let siteConfigPromise = null;   // shared cache for GET /api/auth/config (GA)
+
+function fetchSiteConfig() {
+  if (!siteConfigPromise) {
+    siteConfigPromise = api("/api/auth/config", "GET").catch(() => ({}));
+  }
+  return siteConfigPromise;
+}
 
 const authModal = document.getElementById("auth-modal");
 const authMsg = document.getElementById("auth-msg");
@@ -4893,7 +5453,31 @@ authModal.addEventListener("click", e => {
   if (!currentUser) warmGoogleSignIn();
   // After session restore so admin logins are not counted as visits.
   trackVisit();
+  initGoogleAnalytics();
 })();
+
+/* ---------- Google Analytics (GA4, optional) ----------
+ * Off unless the server has GA_MEASUREMENT_ID configured (see .env.example).
+ * Loaded dynamically (rather than a static <head> snippet) so the ID can be
+ * set per-deploy via an env var instead of being hardcoded in committed HTML,
+ * consistent with how GOOGLE_CLIENT_ID/STRIPE_* are handled in this app. */
+
+async function initGoogleAnalytics() {
+  try {
+    if (currentUser?.can_view_analytics) return; // exclude the site admin, like self-hosted stats
+    const cfg = await fetchSiteConfig();
+    const id = (cfg.ga_measurement_id || "").trim();
+    if (!id || window.gtag) return;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag("js", new Date());
+    window.gtag("config", id);
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+    document.head.appendChild(script);
+  } catch (e) { /* best-effort; never block the app on analytics */ }
+}
 
 /* ---------- Site visit analytics (self-hosted) ---------- */
 
