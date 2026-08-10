@@ -24,8 +24,9 @@ Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
 /api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync and
 practice-move. Game review (annotate-*) stays free.
 
-Analytics (free, self-hosted): POST /api/analytics/hit,
-GET /api/analytics/summary (logged-in; optional ANALYTICS_ADMIN_EMAIL).
+Analytics / admin (free, self-hosted): POST /api/analytics/hit,
+GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
+POST /api/admin/users/<id>/password (admin set temporary password).
 """
 
 from __future__ import annotations
@@ -2042,6 +2043,14 @@ def analytics_summary():
             "SELECT id, created_at, query, source, kind, user_id "
             "FROM analytics_searches ORDER BY created_at DESC LIMIT 200"
         ).fetchall()
+        account_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM users"
+        ).fetchone()["n"]
+        accounts = conn.execute(
+            "SELECT id, email, display_name, created_at, "
+            "google_sub, password_hash, plan, plan_status "
+            "FROM users ORDER BY id"
+        ).fetchall()
 
     return jsonify({
         "all_time": {
@@ -2074,6 +2083,62 @@ def analytics_summary():
                 for r in searches
             ],
         },
+        "accounts": {
+            "total": int(account_total or 0),
+            "users": [
+                {
+                    "id": int(r["id"]),
+                    "email": r["email"],
+                    "display_name": (r["display_name"] or "").strip(),
+                    "created_at": int(r["created_at"] or 0),
+                    "auth_provider": (
+                        "google" if (r["google_sub"] or "").strip() else "password"
+                    ),
+                    "has_password": bool((r["password_hash"] or "").strip()),
+                    "plan": (r["plan"] or "free"),
+                    "plan_status": r["plan_status"],
+                }
+                for r in accounts
+            ],
+        },
+    })
+
+
+@app.post("/api/admin/users/<int:user_id>/password")
+def admin_set_password(user_id: int):
+    """Admin-only: set a temporary password so the user can sign in / change it."""
+    admin, err = _require_login()
+    if err:
+        return err
+    if not _can_view_analytics(admin):
+        return jsonify({"error": "Forbidden", "code": "analytics_forbidden"}), 403
+
+    data = _json_body()
+    new = data.get("new_password") or ""
+    if len(new) < MIN_PASSWORD_LEN:
+        return jsonify({
+            "error": f"Password must be at least {MIN_PASSWORD_LEN} characters."
+        }), 400
+
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id, email, google_sub FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None:
+            return jsonify({"error": "User not found."}), 404
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(new), user_id),
+        )
+
+    return jsonify({
+        "ok": True,
+        "id": user_id,
+        "email": row["email"],
+        "note": (
+            "Temporary password set. Share it out of band; "
+            "Google sign-in still works if linked."
+        ),
     })
 
 

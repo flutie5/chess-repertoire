@@ -47,6 +47,7 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | `SECRET_KEY` | Generate a random 64-char hex string (Render can auto-generate) |
 | `DATA_DIR` | `/data` |
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Web client ID from Google Cloud Console (for Sign in with Google) |
+| `ANALYTICS_ADMIN_EMAIL` | Your login email — unlocks Admin in Profile (account list, set temporary passwords) |
 
 Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom-cache` survive redeploys.
 

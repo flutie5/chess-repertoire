@@ -1057,6 +1057,20 @@
   .analytics-search-row:last-child { border-bottom: 0; }
   .analytics-search-row .q { font-weight: 700; color: var(--text-primary); word-break: break-all; }
   .analytics-search-row .meta { color: var(--text-muted); white-space: nowrap; }
+  .analytics-user-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .analytics-user-row:last-child { border-bottom: 0; }
+  .analytics-user-row .email { font-weight: 700; color: var(--text-primary); word-break: break-all; }
+  .analytics-user-row .meta { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+  .analytics-user-row button {
+    font-size: 11px; padding: 4px 8px; white-space: nowrap;
+  }
   .modal label {
     display: flex; flex-direction: column; gap: 4px;
     font-size: 13px; color: var(--text-secondary);
@@ -1142,6 +1156,8 @@
     border-radius: var(--radius); padding: 22px 24px;
     display: flex; flex-direction: column; gap: 14px;
   }
+  /* Author display:flex beats the UA [hidden] rule — force hide. */
+  .profile-card[hidden] { display: none !important; }
   .profile-card + .profile-card { margin-top: 14px; }
   .profile-card h2 {
     margin: 0; font-size: 16px; font-weight: 700;
@@ -1634,14 +1650,18 @@
   </div>
 
   <div class="profile-card" id="profile-analytics-card" hidden>
-    <h2>Site visits</h2>
-    <p class="hint">Admin only. Sessions ≈ unique browsers per day. Search log starts after deploy (no history before that).</p>
+    <h2>Admin</h2>
+    <p class="hint">Visible only to <code>ANALYTICS_ADMIN_EMAIL</code>. Accounts and visits from production.</p>
     <div class="analytics-stats" id="profile-analytics-stats">
+      <div><span class="analytics-num" id="analytics-account-total">—</span><span class="analytics-label">accounts</span></div>
       <div><span class="analytics-num" id="analytics-today-sessions">—</span><span class="analytics-label">sessions today</span></div>
       <div><span class="analytics-num" id="analytics-today-views">—</span><span class="analytics-label">views today</span></div>
       <div><span class="analytics-num" id="analytics-all-sessions">—</span><span class="analytics-label">sessions all-time</span></div>
       <div><span class="analytics-num" id="analytics-all-views">—</span><span class="analytics-label">views all-time</span></div>
     </div>
+    <h3 style="margin:16px 0 6px;font-size:14px">Accounts</h3>
+    <p class="hint" style="margin:0 0 8px">Emails of everyone who signed up. Set a temporary password for email/password resets (tell them out of band).</p>
+    <div id="analytics-users-list" class="analytics-search-list"></div>
     <h3 style="margin:16px 0 6px;font-size:14px">Search bar analyzes</h3>
     <p class="hint" style="margin:0 0 8px">Every Analyze lookup (username or Analyze my games). Latest 200.</p>
     <div id="analytics-search-list" class="analytics-search-list"></div>
@@ -3116,6 +3136,8 @@ function resetGame(title) {
   state.exploreAnns = {};
   exploreAnnotateToken += 1;
   state.lastOpeningName = null;
+  clearPremove();
+  clearUserShapes();
   clearBoardPlayers();
   setGameView(false);
   // Title is set by scheduleOpeningTitle() inside refreshBoard().
@@ -3277,6 +3299,14 @@ initSidebarResize();
 document.addEventListener("keydown", e => {
   const tag = (e.target.tagName || "").toUpperCase();
   if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+
+  if (e.key === "Escape") {
+    hidePromoPicker();
+    clearSelection({ keepPremove: true, keepShapes: true });
+    if (premove) clearPremove();
+    else if (userShapes.length) clearUserShapes();
+    return;
+  }
 
   // Delete / Backspace always take back one action.
   // ArrowLeft also undoes in the editor or a custom-root analysis.
@@ -4360,7 +4390,16 @@ function fillProfileForm(user) {
 
   const analyticsCard = document.getElementById("profile-analytics-card");
   if (analyticsCard) {
-    analyticsCard.hidden = !user?.can_view_analytics;
+    const showAdmin = !!user?.can_view_analytics;
+    analyticsCard.hidden = !showAdmin;
+    // Belt-and-suspenders: never leave the admin panel in the layout for others.
+    analyticsCard.style.display = showAdmin ? "" : "none";
+    if (!showAdmin) {
+      const usersList = document.getElementById("analytics-users-list");
+      const searchList = document.getElementById("analytics-search-list");
+      if (usersList) usersList.innerHTML = "";
+      if (searchList) searchList.innerHTML = "";
+    }
   }
 }
 
@@ -4897,6 +4936,7 @@ async function trackVisit() {
 async function loadAnalyticsSummary() {
   const msg = document.getElementById("analytics-msg");
   const list = document.getElementById("analytics-search-list");
+  const usersList = document.getElementById("analytics-users-list");
   setMsg(msg, "");
   try {
     const data = await api("/api/analytics/summary", "GET");
@@ -4904,10 +4944,42 @@ async function loadAnalyticsSummary() {
       const el = document.getElementById(id);
       if (el) el.textContent = String(n ?? 0);
     };
+    set("analytics-account-total", data.accounts?.total);
     set("analytics-today-sessions", data.today?.sessions);
     set("analytics-today-views", data.today?.pageviews);
     set("analytics-all-sessions", data.all_time?.sessions);
     set("analytics-all-views", data.all_time?.pageviews);
+
+    if (usersList) {
+      const users = data.accounts?.users || [];
+      if (!users.length) {
+        usersList.innerHTML = `<div class="analytics-user-row"><span class="meta">No accounts yet.</span></div>`;
+      } else {
+        usersList.innerHTML = users.map(u => {
+          const when = u.created_at
+            ? new Date(u.created_at * 1000).toLocaleDateString()
+            : "";
+          const name = (u.display_name || "").trim();
+          const meta = [
+            `#${u.id}`,
+            u.auth_provider || "password",
+            u.plan || "free",
+            when,
+            name,
+          ].filter(Boolean).join(" · ");
+          return `<div class="analytics-user-row" data-user-id="${u.id}">` +
+            `<div>` +
+            `<div class="email">${escapeHtml(u.email || "")}</div>` +
+            `<div class="meta">${escapeHtml(meta)}</div>` +
+            `</div>` +
+            `<button type="button" class="ghost admin-set-pw-btn" data-user-id="${u.id}" data-email="${escapeHtml(u.email || "")}">Set password</button>` +
+            `</div>`;
+        }).join("");
+        usersList.querySelectorAll(".admin-set-pw-btn").forEach(btn => {
+          btn.addEventListener("click", () => adminSetUserPassword(btn));
+        });
+      }
+    }
 
     if (list) {
       const rows = data.searches?.recent || [];
@@ -4935,6 +5007,29 @@ async function loadAnalyticsSummary() {
   }
 }
 
+async function adminSetUserPassword(btn) {
+  const msg = document.getElementById("analytics-msg");
+  const userId = btn.getAttribute("data-user-id");
+  const email = btn.getAttribute("data-email") || "user";
+  const temp = window.prompt(
+    `Temporary password for ${email} (min 8 chars). Share it privately; they can change it in Profile.`,
+    ""
+  );
+  if (temp == null) return;
+  const password = String(temp).trim();
+  if (password.length < 8) {
+    setMsg(msg, "Password must be at least 8 characters.", "error");
+    return;
+  }
+  setMsg(msg, "Setting password…");
+  try {
+    await api(`/api/admin/users/${userId}/password`, "POST", { new_password: password });
+    setMsg(msg, `Temporary password set for ${email}. Tell them out of band.`, "ok");
+  } catch (e) {
+    setMsg(msg, e.message || "Could not set password", "error");
+  }
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -4943,25 +5038,397 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-/* ---------- piece interaction (click-click + drag-and-drop) ---------- */
+/* ---------- Chess.com-style board mechanics ---------- */
 
-let selected = null;          // square name of the selected piece, or null
-let legalDests = new Map();   // dest square -> verbose move (for current selection)
+const MOVE_ANIM_MS = 150;
+const DRAW_COLOR = "#15781B";
+const DRAW_COLOR_ALT = "#FFC107";
+
+let selected = null;
+let legalDests = new Map();
+let selectingPremove = false;
+let premove = null;           // { from, to, promotion? }
+let userShapes = [];          // { kind:'arrow'|'circle', from, to?, color }
+let drawStroke = null;        // { from, color, shift }
+let promoEl = null;
+let promoShade = null;
+let pendingPromo = null;      // { from, to, isPremove }
+let justSelected = false;
+let suppressBoardClick = false;
+let drag = null;
+let drawLayerEl = null;
+let audioCtx = null;
 
 function positionAtPly() {
-  // chess.js instance for the position currently shown on the board
   return tryLoadChess(currentFen());
 }
 
-function clearSelection() {
+function userColorChar() {
+  return state.repColor === "black" ? "b" : "w";
+}
+
+function isUsersTurn(pos) {
+  if (!pos) return false;
+  if (!state.practiceMode) return true;
+  return pos.turn() === userColorChar();
+}
+
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    audioCtx = new AC();
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function tone(freq, dur, type, gain, when) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const t0 = when ?? ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+function noiseBurst(dur, gain) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const n = Math.floor(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const g = ctx.createGain();
+  const f = ctx.createBiquadFilter();
+  f.type = "lowpass";
+  f.frequency.value = 1800;
+  g.gain.value = gain;
+  src.connect(f);
+  f.connect(g);
+  g.connect(ctx.destination);
+  src.start();
+}
+
+function playSfx(kind) {
+  try {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    if (kind === "move") {
+      tone(420, 0.06, "triangle", 0.045, t);
+      noiseBurst(0.03, 0.03);
+    } else if (kind === "capture") {
+      noiseBurst(0.07, 0.07);
+      tone(280, 0.08, "square", 0.035, t);
+    } else if (kind === "check") {
+      tone(520, 0.07, "square", 0.04, t);
+      tone(780, 0.1, "square", 0.03, t + 0.07);
+    } else if (kind === "castle") {
+      tone(360, 0.05, "triangle", 0.04, t);
+      tone(440, 0.06, "triangle", 0.035, t + 0.06);
+    } else if (kind === "promote") {
+      tone(500, 0.05, "sine", 0.04, t);
+      tone(650, 0.06, "sine", 0.035, t + 0.05);
+      tone(820, 0.08, "sine", 0.03, t + 0.1);
+    } else if (kind === "game-end") {
+      tone(300, 0.12, "sine", 0.05, t);
+      tone(220, 0.18, "sine", 0.045, t + 0.12);
+      tone(160, 0.22, "sine", 0.04, t + 0.28);
+    }
+  } catch (_) { /* autoplay / missing AudioContext */ }
+}
+
+function soundKindForMove(played, fenAfter) {
+  const after = tryLoadChess(fenAfter);
+  if (after?.isCheckmate() || after?.isDraw()) return "game-end";
+  if (after?.isCheck()) return "check";
+  const flags = played?.flags || "";
+  if (flags.includes("p")) return "promote";
+  if (flags.includes("k") || flags.includes("q")) return "castle";
+  if (played?.captured) return "capture";
+  return "move";
+}
+
+function playMoveSound(played, fenAfter) {
+  playSfx(soundKindForMove(played, fenAfter));
+}
+
+function kingSquareInCheck(fen) {
+  const pos = tryLoadChess(fen);
+  if (!pos || !pos.isCheck()) return null;
+  const turn = pos.turn();
+  const map = boardMapFromFen(fen);
+  const needle = turn === "w" ? "K" : "k";
+  for (const [sq, pc] of Object.entries(map)) {
+    if (pc === needle) return sq;
+  }
+  return null;
+}
+
+function applyCheckHighlight() {
+  boardEl.querySelectorAll(".sq.check").forEach(el => el.classList.remove("check"));
+  const sq = kingSquareInCheck(currentFen());
+  if (!sq) return;
+  const el = boardEl.querySelector(`.sq[data-square="${sq}"]`);
+  if (el) el.classList.add("check");
+}
+
+function applyPremoveHighlight() {
+  boardEl.querySelectorAll(".premove-from, .premove-to")
+    .forEach(el => el.classList.remove("premove-from", "premove-to"));
+  if (!premove) return;
+  const a = boardEl.querySelector(`.sq[data-square="${premove.from}"]`);
+  const b = boardEl.querySelector(`.sq[data-square="${premove.to}"]`);
+  if (a) a.classList.add("premove-from");
+  if (b) b.classList.add("premove-to");
+}
+
+function setPremove(from, to, promotion) {
+  premove = { from, to, promotion: promotion || undefined };
+  applyPremoveHighlight();
+}
+
+function clearPremove() {
+  premove = null;
+  applyPremoveHighlight();
+}
+
+function sqCenterPx(sqName) {
+  const el = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, size: r.width };
+}
+
+function pieceSrcForMove(played) {
+  const color = played.color === "w" ? "w" : "b";
+  return `/pieces/${color}${played.piece}.png`;
+}
+
+function animatePieceFlight(from, to, src, ms = MOVE_ANIM_MS) {
+  return new Promise(resolve => {
+    const fromEl = boardEl.querySelector(`.sq[data-square="${from}"]`);
+    const toEl = boardEl.querySelector(`.sq[data-square="${to}"]`);
+    if (!fromEl || !toEl) { resolve(); return; }
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    document.getElementById("piece-fly")?.remove();
+    const fly = document.createElement("img");
+    fly.id = "piece-fly";
+    fly.src = src;
+    const size = Math.min(fr.width, fr.height);
+    Object.assign(fly.style, {
+      width: size + "px",
+      height: size + "px",
+      left: fr.left + "px",
+      top: fr.top + "px",
+      transition: `left ${ms}ms cubic-bezier(.2,.7,.3,1), top ${ms}ms cubic-bezier(.2,.7,.3,1)`,
+    });
+    document.body.appendChild(fly);
+    const destImg = toEl.querySelector("img.piece");
+    if (destImg) destImg.classList.add("anim-hide");
+    requestAnimationFrame(() => {
+      fly.style.left = tr.left + "px";
+      fly.style.top = tr.top + "px";
+    });
+    setTimeout(() => {
+      fly.remove();
+      if (destImg) destImg.classList.remove("anim-hide");
+      resolve();
+    }, ms + 16);
+  });
+}
+
+function animateThenRefresh(played, after) {
+  const fromEl = boardEl.querySelector(`.sq[data-square="${played.from}"] img.piece`);
+  const src = fromEl?.src || pieceSrcForMove(played);
+  // Capture from/to rects before re-render
+  const fromRect = boardEl.querySelector(`.sq[data-square="${played.from}"]`)?.getBoundingClientRect();
+  const toRect = boardEl.querySelector(`.sq[data-square="${played.to}"]`)?.getBoundingClientRect();
+
+  // Chess.com also slides the rook on castling
+  let rookFlight = null;
+  const flags = played.flags || "";
+  if (flags.includes("k") || flags.includes("q")) {
+    const rank = played.from[1];
+    const rookFrom = flags.includes("k") ? ("h" + rank) : ("a" + rank);
+    const rookTo = flags.includes("k") ? ("f" + rank) : ("d" + rank);
+    const rf = boardEl.querySelector(`.sq[data-square="${rookFrom}"]`)?.getBoundingClientRect();
+    const rt = boardEl.querySelector(`.sq[data-square="${rookTo}"]`)?.getBoundingClientRect();
+    const rookImg = boardEl.querySelector(`.sq[data-square="${rookFrom}"] img.piece`);
+    if (rf && rt && rookImg) {
+      rookFlight = { fromRect: rf, toRect: rt, src: rookImg.src, to: rookTo };
+    }
+  }
+
+  refreshBoard();
+  if (!fromRect || !toRect) {
+    after?.();
+    return;
+  }
+
+  const flights = [];
+  const spawn = (fr, tr, imgSrc, hideSq) => {
+    const destImg = boardEl.querySelector(`.sq[data-square="${hideSq}"] img.piece`);
+    if (destImg) destImg.classList.add("anim-hide");
+    const fly = document.createElement("img");
+    fly.className = "piece-fly-anim";
+    fly.src = imgSrc;
+    const size = Math.min(fr.width, fr.height);
+    Object.assign(fly.style, {
+      position: "fixed",
+      zIndex: "90",
+      pointerEvents: "none",
+      width: size + "px",
+      height: size + "px",
+      left: fr.left + "px",
+      top: fr.top + "px",
+      transition: `left ${MOVE_ANIM_MS}ms cubic-bezier(.2,.7,.3,1), top ${MOVE_ANIM_MS}ms cubic-bezier(.2,.7,.3,1)`,
+    });
+    document.body.appendChild(fly);
+    requestAnimationFrame(() => {
+      fly.style.left = tr.left + "px";
+      fly.style.top = tr.top + "px";
+    });
+    flights.push({ fly, destImg });
+  };
+
+  document.querySelectorAll(".piece-fly-anim, #piece-fly").forEach(el => el.remove());
+  spawn(fromRect, toRect, src, played.to);
+  if (rookFlight) spawn(rookFlight.fromRect, rookFlight.toRect, rookFlight.src, rookFlight.to);
+
+  setTimeout(() => {
+    for (const { fly, destImg } of flights) {
+      fly.remove();
+      if (destImg) destImg.classList.remove("anim-hide");
+    }
+    after?.();
+  }, MOVE_ANIM_MS + 16);
+}
+
+function ensureDrawLayer() {
+  if (drawLayerEl && boardEl.contains(drawLayerEl)) return drawLayerEl;
+  drawLayerEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  drawLayerEl.id = "draw-layer";
+  drawLayerEl.setAttribute("viewBox", "0 0 8 8");
+  drawLayerEl.setAttribute("preserveAspectRatio", "none");
+  boardEl.appendChild(drawLayerEl);
+  return drawLayerEl;
+}
+
+function clearUserShapes() {
+  userShapes = [];
+  renderUserShapes();
+}
+
+function renderUserShapes() {
+  const svg = ensureDrawLayer();
+  svg.replaceChildren();
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const colors = [...new Set(userShapes.map(s => s.color || DRAW_COLOR))];
+  for (const color of colors) {
+    const id = "draw-ah-" + color.replace(/[^a-zA-Z0-9]/g, "");
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", id);
+    marker.setAttribute("markerWidth", "2.8");
+    marker.setAttribute("markerHeight", "2.8");
+    marker.setAttribute("refX", "1.4");
+    marker.setAttribute("refY", "1.4");
+    marker.setAttribute("orient", "auto");
+    marker.setAttribute("markerUnits", "strokeWidth");
+    const head = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    head.setAttribute("d", "M0,0 L2.8,1.4 L0,2.8 Z");
+    head.setAttribute("fill", color);
+    marker.appendChild(head);
+    defs.appendChild(marker);
+  }
+  svg.appendChild(defs);
+
+  for (const shape of userShapes) {
+    const color = shape.color || DRAW_COLOR;
+    if (shape.kind === "circle") {
+      const c = sqToCenter(shape.from, state.orientation);
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", c.x);
+      circle.setAttribute("cy", c.y);
+      circle.setAttribute("r", "0.42");
+      circle.setAttribute("fill", "none");
+      circle.setAttribute("stroke", color);
+      circle.setAttribute("stroke-width", "0.12");
+      circle.setAttribute("opacity", "0.85");
+      svg.appendChild(circle);
+    } else if (shape.kind === "arrow") {
+      const a = sqToCenter(shape.from, state.orientation);
+      const b = sqToCenter(shape.to, state.orientation);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const shrink = 0.28;
+      const x1 = a.x + (dx / len) * shrink;
+      const y1 = a.y + (dy / len) * shrink;
+      const x2 = b.x - (dx / len) * shrink;
+      const y2 = b.y - (dy / len) * shrink;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1);
+      line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2);
+      line.setAttribute("y2", y2);
+      line.setAttribute("stroke", color);
+      line.setAttribute("stroke-width", "0.18");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("opacity", "0.85");
+      line.setAttribute("marker-end", `url(#draw-ah-${color.replace(/[^a-zA-Z0-9]/g, "")})`);
+      svg.appendChild(line);
+    }
+  }
+}
+
+function toggleUserShape(shape) {
+  const key = shape.kind === "circle"
+    ? `c:${shape.from}:${shape.color}`
+    : `a:${shape.from}:${shape.to}:${shape.color}`;
+  const idx = userShapes.findIndex(s => {
+    const k = s.kind === "circle"
+      ? `c:${s.from}:${s.color}`
+      : `a:${s.from}:${s.to}:${s.color}`;
+    return k === key;
+  });
+  if (idx >= 0) userShapes.splice(idx, 1);
+  else userShapes.push(shape);
+  renderUserShapes();
+}
+
+function clearSelection(opts = {}) {
   selected = null;
   legalDests = new Map();
+  selectingPremove = false;
   hidePromoPicker();
-  boardEl.querySelectorAll(".sel, .dest, .capture")
-    .forEach(el => el.classList.remove("sel", "dest", "capture"));
+  boardEl.querySelectorAll(".sel, .dest, .capture, .premove-dest, .drag-over")
+    .forEach(el => el.classList.remove("sel", "dest", "capture", "premove-dest", "drag-over"));
+  if (!opts.keepPremove) { /* selection clear doesn't clear premove by default on refresh */ }
+  if (!opts.keepShapes) { /* shapes cleared explicitly on left-click / move */ }
+}
+
+function premoveCandidates(sqName) {
+  const parts = currentFen().split(/\s+/);
+  parts[1] = userColorChar();
+  const pos = tryLoadChess(parts.join(" "));
+  if (!pos) return [];
+  return pos.moves({ square: sqName, verbose: true });
 }
 
 function markMovablePieces() {
+  boardEl.querySelectorAll(".sq.movable").forEach(el => el.classList.remove("movable"));
   if (state.editMode) {
     for (const sq of boardEl.querySelectorAll(".sq")) {
       if (sq.querySelector("img.piece")) sq.classList.add("movable");
@@ -4970,6 +5437,17 @@ function markMovablePieces() {
   }
   const pos = positionAtPly();
   if (!pos || pos.isGameOver()) return;
+
+  if (state.practiceMode) {
+    // Own pieces always movable (live move or premove), matching Chess.com play.
+    const uc = userColorChar();
+    for (const sq of boardEl.querySelectorAll(".sq")) {
+      const pc = pos.get(sq.dataset.square);
+      if (pc && pc.color === uc) sq.classList.add("movable");
+    }
+    return;
+  }
+
   const turn = pos.turn();
   for (const sq of boardEl.querySelectorAll(".sq")) {
     const pc = pos.get(sq.dataset.square);
@@ -4977,8 +5455,19 @@ function markMovablePieces() {
   }
 }
 
+function paintDests(moves, asPremove) {
+  for (const m of moves) {
+    legalDests.set(m.to, m);
+    const el = boardEl.querySelector(`.sq[data-square="${m.to}"]`);
+    if (!el) continue;
+    el.classList.add("dest");
+    if (asPremove) el.classList.add("premove-dest");
+    if (m.captured || (m.flags && m.flags.includes("e"))) el.classList.add("capture");
+  }
+}
+
 function selectSquare(sqName) {
-  clearSelection();
+  clearSelection({ keepPremove: true, keepShapes: true });
   if (state.editMode) {
     selected = sqName;
     const selEl = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
@@ -4987,83 +5476,192 @@ function selectSquare(sqName) {
   }
   const pos = positionAtPly();
   if (!pos) return false;
+
+  if (state.practiceMode) {
+    const pc = pos.get(sqName);
+    if (!pc || pc.color !== userColorChar()) return false;
+    selected = sqName;
+    selectingPremove = !isUsersTurn(pos);
+    const moves = selectingPremove
+      ? premoveCandidates(sqName)
+      : pos.moves({ square: sqName, verbose: true });
+    if (!moves.length && !selectingPremove) return false;
+    const selEl = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
+    if (selEl) selEl.classList.add("sel");
+    paintDests(moves, selectingPremove);
+    return true;
+  }
+
   const moves = pos.moves({ square: sqName, verbose: true });
   if (!moves.length) return false;
   selected = sqName;
-  for (const m of moves) legalDests.set(m.to, m);
+  selectingPremove = false;
   const selEl = boardEl.querySelector(`.sq[data-square="${sqName}"]`);
   if (selEl) selEl.classList.add("sel");
-  for (const [dest, m] of legalDests) {
-    const el = boardEl.querySelector(`.sq[data-square="${dest}"]`);
-    if (!el) continue;
-    el.classList.add("dest");
-    if (m.captured) el.classList.add("capture");
-  }
+  paintDests(moves, false);
   return true;
 }
 
-function tryMove(from, to) {
+function tryMove(from, to, opts = {}) {
   if (state.editMode) {
     relocatePiece(from, to);
     clearSelection();
     return true;
   }
   const m = legalDests.get(to);
-  if (!m) return false;
-  if (m.promotion) { showPromoPicker(from, to); return true; }
-  clearSelection();
-  makeUserMove(from, to);
+  if (!m && !opts.force) return false;
+
+  if (selectingPremove || (state.practiceMode && positionAtPly() && !isUsersTurn(positionAtPly()))) {
+    // Queue premove (Chess.com: one pending move)
+    if (m?.promotion || opts.promotionNeeded) {
+      showPromoPicker(from, to, { isPremove: true });
+      return true;
+    }
+    clearSelection({ keepPremove: true, keepShapes: true });
+    setPremove(from, to, opts.promotion);
+    return true;
+  }
+
+  const move = m || legalDests.get(to);
+  if (!move && !opts.promotion) return false;
+  if ((move && move.promotion) || opts.promotionNeeded) {
+    showPromoPicker(from, to, { isPremove: false });
+    return true;
+  }
+  clearSelection({ keepPremove: true, keepShapes: true });
+  makeUserMove(from, to, opts.promotion, { viaDrag: !!opts.viaDrag, animate: opts.animate });
   return true;
 }
 
-/* promotion picker */
-let promoEl = null;
 function hidePromoPicker() {
   if (promoEl) { promoEl.remove(); promoEl = null; }
+  if (promoShade) { promoShade.remove(); promoShade = null; }
+  pendingPromo = null;
 }
-function showPromoPicker(from, to) {
+
+function showPromoPicker(from, to, { isPremove = false } = {}) {
   hidePromoPicker();
   const pos = positionAtPly();
-  if (!pos) { makeUserMove(from, to, "q"); return; }
-  const color = pos.turn() === "w" ? "w" : "b";
+  // For premoves, side is the user; otherwise side to move
+  const color = isPremove
+    ? userColorChar()
+    : (pos ? pos.turn() : "w");
   const destEl = boardEl.querySelector(`.sq[data-square="${to}"]`);
-  if (!destEl) { makeUserMove(from, to, "q"); return; }
+  if (!destEl) {
+    if (isPremove) setPremove(from, to, "q");
+    else makeUserMove(from, to, "q", { viaDrag: true });
+    return;
+  }
+
+  pendingPromo = { from, to, isPremove };
+
+  promoShade = document.createElement("div");
+  promoShade.id = "promo-shade";
+  promoShade.onclick = () => {
+    hidePromoPicker();
+    clearSelection({ keepPremove: true, keepShapes: true });
+  };
+  boardEl.appendChild(promoShade);
+
+  // Chess.com: Q/N/R/B cover the promotion file squares (orientation-safe)
+  const file = to[0];
+  const promoRank = +to[1];
+  const promotingWhite = color === "w";
+  const ranks = promotingWhite
+    ? [promoRank, promoRank - 1, promoRank - 2, promoRank - 3]
+    : [promoRank, promoRank + 1, promoRank + 2, promoRank + 3];
+  const pieces = ["q", "n", "r", "b"];
 
   promoEl = document.createElement("div");
   promoEl.id = "promo-picker";
-  for (const p of ["q", "n", "r", "b"]) {
+  promoEl.style.background = "transparent";
+  promoEl.style.boxShadow = "none";
+  promoEl.style.width = "100%";
+  promoEl.style.height = "100%";
+  promoEl.style.left = "0";
+  promoEl.style.top = "0";
+  promoEl.style.display = "block";
+  promoEl.style.pointerEvents = "none";
+
+  const bRect = boardEl.getBoundingClientRect();
+  pieces.forEach((p, i) => {
+    const sqName = file + ranks[i];
+    const cell = boardEl.querySelector(`.sq[data-square="${sqName}"]`) || destEl;
+    const r = cell.getBoundingClientRect();
     const b = document.createElement("button");
+    b.type = "button";
+    b.style.pointerEvents = "auto";
+    b.style.position = "absolute";
+    b.style.left = (r.left - bRect.left) + "px";
+    b.style.top = (r.top - bRect.top) + "px";
+    b.style.width = r.width + "px";
+    b.style.height = r.height + "px";
     const img = document.createElement("img");
     img.src = `/pieces/${color}${p}.png`;
     img.alt = p;
     b.appendChild(img);
     b.onclick = ev => {
       ev.stopPropagation();
+      const { from: f, to: t, isPremove: pre } = pendingPromo || {};
       hidePromoPicker();
-      makeUserMove(from, to, p);
+      if (pre) {
+        setPremove(f, t, p);
+        clearSelection({ keepPremove: true, keepShapes: true });
+      } else {
+        clearSelection({ keepPremove: true, keepShapes: true });
+        makeUserMove(f, t, p, { viaDrag: true });
+      }
     };
     promoEl.appendChild(b);
-  }
+  });
   boardEl.appendChild(promoEl);
-  // place next to the promotion square, growing downward into the board
-  const bRect = boardEl.getBoundingClientRect();
-  const dRect = destEl.getBoundingClientRect();
-  const left = Math.min(dRect.left - bRect.left, bRect.width - 64);
-  const top = dRect.top - bRect.top;
-  promoEl.style.left = left + "px";
-  promoEl.style.top = (top + promoEl.offsetHeight > bRect.height
-    ? Math.max(0, bRect.height - promoEl.offsetHeight) : top) + "px";
+}
+
+function tryExecutePremove() {
+  if (!premove || !state.practiceMode) return false;
+  const pos = positionAtPly();
+  if (!pos || !isUsersTurn(pos) || pos.isGameOver()) {
+    if (pos?.isGameOver()) clearPremove();
+    return false;
+  }
+  const { from, to, promotion } = premove;
+  const legal = pos.moves({ square: from, verbose: true });
+  const hit = legal.find(m =>
+    m.to === to && (!m.promotion || m.promotion === (promotion || "q"))
+  );
+  clearPremove();
+  if (!hit) return false;
+  makeUserMove(from, to, hit.promotion ? (promotion || "q") : undefined, { animate: true });
+  return true;
+}
+
+function updatePracticeGameStatus() {
+  const st = document.getElementById("rep-practice-status");
+  if (!st || !state.practiceMode) return;
+  const pos = positionAtPly();
+  if (!pos) return;
+  if (pos.isCheckmate()) {
+    const winner = pos.turn() === "w" ? "Black" : "White";
+    st.textContent = `Checkmate — ${winner} wins.`;
+    return true;
+  }
+  if (pos.isStalemate()) { st.textContent = "Draw by stalemate."; return true; }
+  if (pos.isThreefoldRepetition()) { st.textContent = "Draw by repetition."; return true; }
+  if (pos.isInsufficientMaterial()) { st.textContent = "Draw — insufficient material."; return true; }
+  if (pos.isDraw()) { st.textContent = "Draw."; return true; }
+  return false;
 }
 
 /* click-to-move */
-let justSelected = false;   // pointerdown selected this piece; don't deselect on the click
-let suppressBoardClick = false;
-
 boardEl.addEventListener("click", e => {
   if (suppressBoardClick) { suppressBoardClick = false; return; }
   const sq = e.target.closest(".sq");
   if (!sq || !boardEl.contains(sq)) return;
-  if (promoEl) { hidePromoPicker(); clearSelection(); return; }
+  if (promoEl) { hidePromoPicker(); clearSelection({ keepPremove: true, keepShapes: true }); return; }
+
+  // Left-click clears drawn arrows/circles (Chess.com)
+  if (userShapes.length) clearUserShapes();
+
   const name = sq.dataset.square;
 
   if (state.editMode) {
@@ -5090,34 +5688,34 @@ boardEl.addEventListener("click", e => {
   if (selected) {
     if (name === selected) {
       if (justSelected) { justSelected = false; return; }
-      clearSelection();
+      clearSelection({ keepPremove: true, keepShapes: true });
       return;
     }
     justSelected = false;
-    if (tryMove(selected, name)) return;
+    if (tryMove(selected, name, { animate: true })) return;
     // clicking another of my pieces re-selects; otherwise deselect
-    if (!selectSquare(name)) clearSelection();
+    if (!selectSquare(name)) clearSelection({ keepPremove: true, keepShapes: true });
   } else {
     selectSquare(name);
   }
 });
 
-/* drag-and-drop via pointer events */
-let drag = null;   // { from, ghost, img, moved, piece, fromPalette }
-
-function makeGhostFromImg(img, clientX, clientY) {
-  const rect = img.getBoundingClientRect();
-  const ghost = img.cloneNode(true);
-  ghost.id = "drag-ghost";
-  ghost.style.width = Math.max(rect.width, 36) * 0.92 + "px";
-  ghost.style.height = Math.max(rect.height, 36) * 0.92 + "px";
-  document.body.appendChild(ghost);
-  ghost.style.left = clientX - ghost.offsetWidth / 2 + "px";
-  ghost.style.top = clientY - ghost.offsetHeight / 2 + "px";
-  return ghost;
-}
+/* Right-click arrows & circles */
+boardEl.addEventListener("contextmenu", e => {
+  e.preventDefault();
+});
 
 boardEl.addEventListener("pointerdown", e => {
+  if (e.button === 2) {
+    const sq = e.target.closest(".sq");
+    if (!sq || !boardEl.contains(sq)) return;
+    drawStroke = {
+      from: sq.dataset.square,
+      color: e.shiftKey ? DRAW_COLOR_ALT : DRAW_COLOR,
+    };
+    e.preventDefault();
+    return;
+  }
   if (e.button !== 0 || promoEl) return;
 
   if (state.editMode) {
@@ -5137,6 +5735,7 @@ boardEl.addEventListener("pointerdown", e => {
       piece: img.alt,
       fromPalette: false,
     };
+    try { boardEl.setPointerCapture(e.pointerId); } catch (_) {}
     e.preventDefault();
     return;
   }
@@ -5151,8 +5750,43 @@ boardEl.addEventListener("pointerdown", e => {
 
   const ghost = makeGhostFromImg(img, e.clientX, e.clientY);
   drag = { from: sq.dataset.square, ghost, img, moved: false, fromPalette: false };
+  try { boardEl.setPointerCapture(e.pointerId); } catch (_) {}
   e.preventDefault();
 });
+
+boardEl.addEventListener("pointerup", e => {
+  if (e.button !== 2 || !drawStroke) return;
+  e.stopPropagation();
+  const sq = e.target.closest(".sq");
+  const to = sq && boardEl.contains(sq) ? sq.dataset.square : drawStroke.from;
+  if (to === drawStroke.from) {
+    toggleUserShape({ kind: "circle", from: to, color: drawStroke.color });
+  } else {
+    toggleUserShape({ kind: "arrow", from: drawStroke.from, to, color: drawStroke.color });
+  }
+  drawStroke = null;
+});
+
+document.addEventListener("pointerup", e => {
+  if (e.button !== 2 || !drawStroke) return;
+  // Released outside the board — treat as circle on start square
+  toggleUserShape({ kind: "circle", from: drawStroke.from, color: drawStroke.color });
+  drawStroke = null;
+});
+
+function makeGhostFromImg(img, clientX, clientY) {
+  const rect = img.getBoundingClientRect();
+  const ghost = img.cloneNode(true);
+  ghost.id = "drag-ghost";
+  // Chess.com: dragged piece is slightly larger than a square
+  const size = Math.max(rect.width, 36) * 1.08;
+  ghost.style.width = size + "px";
+  ghost.style.height = size + "px";
+  document.body.appendChild(ghost);
+  ghost.style.left = clientX - ghost.offsetWidth / 2 + "px";
+  ghost.style.top = clientY - ghost.offsetHeight / 2 + "px";
+  return ghost;
+}
 
 document.querySelectorAll(".piece-bank").forEach(bank => {
   bank.addEventListener("pointerdown", e => {
@@ -5180,24 +5814,37 @@ function moveGhost(e) {
   drag.ghost.style.top = e.clientY - drag.ghost.offsetHeight / 2 + "px";
 }
 
-document.addEventListener("pointermove", e => {
-  if (!drag) return;
-  if (!drag.moved) {
-    drag.moved = true;
-    if (drag.img) drag.img.classList.add("dragging");
+function updateDragOver(e) {
+  boardEl.querySelectorAll(".sq.drag-over").forEach(el => el.classList.remove("drag-over"));
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  const sq = target && target.closest(".sq");
+  if (sq && boardEl.contains(sq) && (sq.classList.contains("dest") || sq.dataset.square === drag?.from)) {
+    sq.classList.add("drag-over");
   }
-  moveGhost(e);
+}
+
+document.addEventListener("pointermove", e => {
+  if (drag) {
+    if (!drag.moved) {
+      drag.moved = true;
+      if (drag.img) drag.img.classList.add("dragging");
+    }
+    moveGhost(e);
+    updateDragOver(e);
+  }
 });
 
 document.addEventListener("pointerup", e => {
+  if (e.button === 2) return;
   if (!drag) return;
   const { from, ghost, img, moved, piece, fromPalette } = drag;
   drag = null;
   ghost.remove();
   if (img) img.classList.remove("dragging");
+  boardEl.querySelectorAll(".sq.drag-over").forEach(el => el.classList.remove("drag-over"));
 
   if (state.editMode) {
-    if (!moved && !fromPalette) return; // plain click: click handler manages selection
+    if (!moved && !fromPalette) return;
     if (moved) suppressBoardClick = true;
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const sq = target && target.closest(".sq");
@@ -5210,19 +5857,23 @@ document.addEventListener("pointerup", e => {
       if (sq.dataset.square !== from) relocatePiece(from, sq.dataset.square);
       clearSelection();
     } else {
-      // Dragged off the board — remove the piece
       removePieceAt(from);
       clearSelection();
     }
     return;
   }
 
-  if (!moved) return;   // plain click: let the click handler manage selection
+  if (!moved) return;
   suppressBoardClick = true;
   const target = document.elementFromPoint(e.clientX, e.clientY);
   const sq = target && target.closest(".sq");
   if (sq && boardEl.contains(sq) && sq.dataset.square !== from) {
-    if (!tryMove(from, sq.dataset.square)) clearSelection();
+    if (!tryMove(from, sq.dataset.square, { viaDrag: true })) {
+      clearSelection({ keepPremove: true, keepShapes: true });
+    }
+  } else {
+    // Illegal / off-board drop: snap-back (selection kept if still selected)
+    clearSelection({ keepPremove: true, keepShapes: true });
   }
 });
 
@@ -5231,6 +5882,12 @@ document.addEventListener("pointercancel", () => {
   drag.ghost.remove();
   if (drag.img) drag.img.classList.remove("dragging");
   drag = null;
+  boardEl.querySelectorAll(".sq.drag-over").forEach(el => el.classList.remove("drag-over"));
+});
+
+/* Unlock audio on first gesture */
+["pointerdown", "keydown"].forEach(ev => {
+  document.addEventListener(ev, () => ensureAudio(), { once: true, passive: true });
 });
 
 /* ---------- my repertoire ---------- */
@@ -6047,6 +6704,7 @@ function stopPractice() {
   document.body.classList.remove("practice-mode");
   practiceBusy = false;
   clearTimeout(practiceTimer);
+  clearPremove();
   const st = document.getElementById("rep-practice-status");
   if (st) st.textContent = "";
 }
@@ -6139,7 +6797,7 @@ async function runPracticeReply() {
   try {
     const c = new Chess(fen);
     if (c.isGameOver()) {
-      document.getElementById("rep-practice-status").textContent = "Game over.";
+      updatePracticeGameStatus();
       return;
     }
     turn = c.turn();
@@ -6152,6 +6810,7 @@ async function runPracticeReply() {
   if (!engineToMove) {
     document.getElementById("rep-practice-status").textContent =
       `Your move as ${state.repColor === "white" ? "White" : "Black"}.`;
+    tryExecutePremove();
     return;
   }
 
@@ -6164,12 +6823,36 @@ async function runPracticeReply() {
     });
     if (!state.practiceMode) return;
     if (state.ply < state.sans.length) truncateToPly();
-    game.move({ from: data.from, to: data.to, promotion: data.promotion || undefined });
+    let played;
+    try {
+      played = game.move({
+        from: data.from,
+        to: data.to,
+        promotion: data.promotion || undefined,
+      });
+    } catch (e) {
+      document.getElementById("rep-practice-status").textContent = "Engine move failed.";
+      return;
+    }
     rebuildDerived();
     state.ply = state.sans.length;
-    refreshBoard();
-    document.getElementById("rep-practice-status").textContent =
-      `Stockfish played ${data.san}. Your move.`;
+    clearUserShapes();
+
+    await new Promise(resolve => {
+      animateThenRefresh(played, () => {
+        playMoveSound(played, currentFen());
+        resolve();
+      });
+    });
+
+    updatePracticeGameStatus();
+    const pos = positionAtPly();
+    if (pos && !pos.isGameOver()) {
+      document.getElementById("rep-practice-status").textContent =
+        `Stockfish played ${data.san}. Your move.`;
+      // Chess.com: fire premove immediately after opponent lands
+      tryExecutePremove();
+    }
   } catch (e) {
     if (handleProGateError(e)) {
       stopPractice();
