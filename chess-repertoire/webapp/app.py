@@ -24,13 +24,15 @@ Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
 /api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync and
 practice-move. Game review (annotate-*) stays free.
 
-Analytics (free, self-hosted): POST /api/analytics/hit,
-GET /api/analytics/summary (logged-in; optional ANALYTICS_ADMIN_EMAIL).
+Analytics / admin (free, self-hosted): POST /api/analytics/hit,
+GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
+POST /api/admin/users/<id>/password (admin set temporary password).
 """
 
 from __future__ import annotations
 
 import atexit
+import hashlib
 import os
 import re
 import secrets
@@ -1742,12 +1744,24 @@ def _login_user(user: sqlite3.Row) -> dict:
     return _user_payload(user)
 
 
+# Google ID tokens for interactive sign-in should be fresh (GIS issues short-lived JWTs).
+_GOOGLE_TOKEN_MAX_AGE_SEC = 5 * 60
+
+
 @app.get("/api/auth/config")
 def auth_config():
-    return jsonify({
+    """Return GIS client ID, GA4 id, and a one-time nonce bound to this session."""
+    payload = {
         "google_client_id": GOOGLE_CLIENT_ID or None,
         "ga_measurement_id": GA_MEASUREMENT_ID or None,
-    })
+        "nonce": None,
+    }
+    if GOOGLE_CLIENT_ID:
+        nonce = secrets.token_urlsafe(32)
+        session.permanent = True
+        session["google_nonce"] = nonce
+        payload["nonce"] = nonce
+    return jsonify(payload)
 
 
 @app.post("/api/auth/google")
@@ -1755,9 +1769,17 @@ def auth_google():
     if not GOOGLE_CLIENT_ID:
         return jsonify({"error": "Google sign-in is not configured on this server."}), 503
 
-    credential = (_json_body().get("credential") or "").strip()
+    body = _json_body()
+    credential = (body.get("credential") or "").strip()
     if not credential:
         return jsonify({"error": "Missing Google credential."}), 400
+
+    expected_nonce = (session.get("google_nonce") or "").strip()
+    if not expected_nonce:
+        return jsonify({
+            "error": "Sign-in session expired. Close and reopen the sign-in dialog, then try again.",
+            "code": "nonce_missing",
+        }), 401
 
     try:
         from google.auth.transport import requests as google_requests
@@ -1766,11 +1788,35 @@ def auth_google():
             credential,
             google_requests.Request(),
             GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=60,
         )
-    except Exception:
+    except Exception as exc:
+        print(f"WARNING: Google token verify failed: {exc}", flush=True)
         return jsonify({"error": "Invalid Google credential."}), 401
 
     if info.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        return jsonify({"error": "Invalid Google credential."}), 401
+
+    token_nonce = (info.get("nonce") or "").strip()
+    # GIS normally echoes the nonce; some Google flows put SHA-256(hex) instead.
+    expected_hash = hashlib.sha256(expected_nonce.encode("utf-8")).hexdigest()
+    nonce_ok = bool(token_nonce) and (
+        secrets.compare_digest(token_nonce, expected_nonce)
+        or secrets.compare_digest(token_nonce, expected_hash)
+    )
+    if not nonce_ok:
+        return jsonify({
+            "error": "Google sign-in could not be verified. Please try again.",
+            "code": "nonce_mismatch",
+        }), 401
+    # One-time nonce — prevent replay of the same credential against this session.
+    session.pop("google_nonce", None)
+
+    iat = info.get("iat")
+    try:
+        if iat is not None and (time.time() - int(iat)) > _GOOGLE_TOKEN_MAX_AGE_SEC:
+            return jsonify({"error": "Google sign-in expired. Please try again."}), 401
+    except (TypeError, ValueError):
         return jsonify({"error": "Invalid Google credential."}), 401
 
     sub = (info.get("sub") or "").strip()
@@ -1783,6 +1829,7 @@ def auth_google():
         return jsonify({"error": "Google account email is invalid."}), 400
 
     display_name = (info.get("name") or "").strip()[:120]
+    is_new_account = False
 
     with _db() as conn:
         user = conn.execute(
@@ -1793,7 +1840,12 @@ def auth_google():
                 "SELECT * FROM users WHERE email = ?", (email,)
             ).fetchone()
             if by_email is not None:
-                # Link Google to an existing email/password account.
+                existing_sub = (by_email["google_sub"] or "").strip()
+                if existing_sub and existing_sub != sub:
+                    return jsonify({
+                        "error": "This email is already linked to a different Google account.",
+                    }), 409
+                # Safe to link: Google verified ownership of this email (email_verified).
                 conn.execute(
                     "UPDATE users SET google_sub = ?, "
                     "display_name = CASE WHEN COALESCE(display_name, '') = '' "
@@ -1813,17 +1865,36 @@ def auth_google():
                 user = conn.execute(
                     "SELECT * FROM users WHERE id = ?", (cur.lastrowid,)
                 ).fetchone()
-        elif display_name and not (user["display_name"] or "").strip():
-            conn.execute(
-                "UPDATE users SET display_name = ? WHERE id = ?",
-                (display_name, user["id"]),
-            )
-            user = conn.execute(
-                "SELECT * FROM users WHERE id = ?", (user["id"],)
-            ).fetchone()
+                is_new_account = True
+        else:
+            # Returning Google user: keep email in sync if Google reports a new verified address.
+            updates = []
+            params: list = []
+            current_email = (user["email"] or "").strip().lower()
+            if email and email != current_email:
+                clash = conn.execute(
+                    "SELECT id FROM users WHERE email = ? AND id != ?",
+                    (email, user["id"]),
+                ).fetchone()
+                if clash is None:
+                    updates.append("email = ?")
+                    params.append(email)
+            if display_name and not (user["display_name"] or "").strip():
+                updates.append("display_name = ?")
+                params.append(display_name)
+            if updates:
+                params.append(user["id"])
+                conn.execute(
+                    f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+                    params,
+                )
+                user = conn.execute(
+                    "SELECT * FROM users WHERE id = ?", (user["id"],)
+                ).fetchone()
 
-    return jsonify(_login_user(user))
-
+    payload = _login_user(user)
+    payload["is_new_account"] = is_new_account
+    return jsonify(payload)
 
 @app.post("/api/register")
 def register():
@@ -1986,6 +2057,14 @@ def analytics_summary():
             "SELECT id, created_at, query, source, kind, user_id "
             "FROM analytics_searches ORDER BY created_at DESC LIMIT 200"
         ).fetchall()
+        account_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM users"
+        ).fetchone()["n"]
+        accounts = conn.execute(
+            "SELECT id, email, display_name, created_at, "
+            "google_sub, password_hash, plan, plan_status "
+            "FROM users ORDER BY id"
+        ).fetchall()
 
     return jsonify({
         "all_time": {
@@ -2018,6 +2097,62 @@ def analytics_summary():
                 for r in searches
             ],
         },
+        "accounts": {
+            "total": int(account_total or 0),
+            "users": [
+                {
+                    "id": int(r["id"]),
+                    "email": r["email"],
+                    "display_name": (r["display_name"] or "").strip(),
+                    "created_at": int(r["created_at"] or 0),
+                    "auth_provider": (
+                        "google" if (r["google_sub"] or "").strip() else "password"
+                    ),
+                    "has_password": bool((r["password_hash"] or "").strip()),
+                    "plan": (r["plan"] or "free"),
+                    "plan_status": r["plan_status"],
+                }
+                for r in accounts
+            ],
+        },
+    })
+
+
+@app.post("/api/admin/users/<int:user_id>/password")
+def admin_set_password(user_id: int):
+    """Admin-only: set a temporary password so the user can sign in / change it."""
+    admin, err = _require_login()
+    if err:
+        return err
+    if not _can_view_analytics(admin):
+        return jsonify({"error": "Forbidden", "code": "analytics_forbidden"}), 403
+
+    data = _json_body()
+    new = data.get("new_password") or ""
+    if len(new) < MIN_PASSWORD_LEN:
+        return jsonify({
+            "error": f"Password must be at least {MIN_PASSWORD_LEN} characters."
+        }), 400
+
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id, email, google_sub FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None:
+            return jsonify({"error": "User not found."}), 404
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(new), user_id),
+        )
+
+    return jsonify({
+        "ok": True,
+        "id": user_id,
+        "email": row["email"],
+        "note": (
+            "Temporary password set. Share it out of band; "
+            "Google sign-in still works if linked."
+        ),
     })
 
 

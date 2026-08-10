@@ -19,6 +19,8 @@ services:
         value: /data
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: ANALYTICS_ADMIN_EMAIL
+        sync: false
       - key: GA_MEASUREMENT_ID
         sync: false
     disk:
