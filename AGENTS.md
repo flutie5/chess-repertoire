@@ -40,3 +40,11 @@ is also a CLI (`chess-repertoire/build_repertoire.py`). See
   app runs fully; email/password registration still works, and Pro gates are disabled.
 - Local state lives in `webapp/users.db` (SQLite) and `webapp/.secret_key`, both
   gitignored and created on first run.
+- Site-visit analytics already exist and are self-hosted (no third-party service
+  needed): the frontend pings `POST /api/analytics/hit` on page load, and
+  `GET /api/analytics/summary` (surfaced as a "Site visits" card on the Profile
+  page) returns pageviews/sessions per day plus recent Analyze-lookup searches.
+  This dashboard is hidden unless the `ANALYTICS_ADMIN_EMAIL` env var is set to
+  the email of a registered account — only that account can see it (and its own
+  visits are excluded from the counts). Set it in `chess-repertoire/.env` for
+  local dev, or as an env var in Render/Netlify for production.
