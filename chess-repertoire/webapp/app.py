@@ -1986,12 +1986,16 @@ def analytics_summary():
             "SELECT id, created_at, query, source, kind, user_id "
             "FROM analytics_searches ORDER BY created_at DESC LIMIT 200"
         ).fetchall()
+        total_users = conn.execute(
+            "SELECT COUNT(*) AS n FROM users"
+        ).fetchone()["n"]
 
     return jsonify({
         "all_time": {
             "pageviews": int(totals["pageviews"] or 0),
             "sessions": int(totals["sessions"] or 0),
         },
+        "total_users": int(total_users or 0),
         "today": {
             "pageviews": int(today_row["pageviews"]) if today_row else 0,
             "sessions": int(today_row["sessions"]) if today_row else 0,

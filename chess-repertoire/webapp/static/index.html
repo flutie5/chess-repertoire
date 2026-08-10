@@ -1939,6 +1939,7 @@
     <h2>Site visits</h2>
     <p class="hint">Admin only. Sessions ≈ unique browsers per day. Search log starts after deploy (no history before that).</p>
     <div class="analytics-stats" id="profile-analytics-stats">
+      <div><span class="analytics-num" id="analytics-total-users">—</span><span class="analytics-label">accounts created</span></div>
       <div><span class="analytics-num" id="analytics-today-sessions">—</span><span class="analytics-label">sessions today</span></div>
       <div><span class="analytics-num" id="analytics-today-views">—</span><span class="analytics-label">views today</span></div>
       <div><span class="analytics-num" id="analytics-all-sessions">—</span><span class="analytics-label">sessions all-time</span></div>
@@ -5321,6 +5322,7 @@ async function loadAnalyticsSummary() {
       const el = document.getElementById(id);
       if (el) el.textContent = String(n ?? 0);
     };
+    set("analytics-total-users", data.total_users);
     set("analytics-today-sessions", data.today?.sessions);
     set("analytics-today-views", data.today?.pageviews);
     set("analytics-all-sessions", data.all_time?.sessions);
