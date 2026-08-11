@@ -720,10 +720,8 @@ async function fetchEval(fen) {
       engineAvailable = null;
       enginePanel.classList.add("visible");
       labelEl.textContent = "Stockfish — sign in to see evaluations";
-      handleProGateError(Object.assign(new Error(data?.error || "Sign in required"), {
-        status: 401,
-        code: "login_required",
-      }));
+      // Soft prompt once — never re-open on every eval refresh.
+      openAuthModal({ soft: true });
       return;
     }
     if (resp.status === 429) {
@@ -3284,7 +3282,7 @@ async function submitAuth(path) {
 
 function finishLogin(user, isNewAccount) {
   setUser(user);
-  authModal.classList.remove("open");
+  closeAuthModal();
   document.getElementById("auth-password").value = "";
   setMsg(authMsg, "");
   setMsg(authGoogleMsg, "");
@@ -3479,7 +3477,36 @@ async function startGoogleSignIn() {
   }
 }
 
+const AUTH_SOFT_PROMPT_KEY = "authSoftPromptSeen";
+let authModalSoft = false;
+
+function authSoftPromptSeen() {
+  try { return localStorage.getItem(AUTH_SOFT_PROMPT_KEY) === "1"; } catch (e) { return false; }
+}
+
+function markAuthSoftPromptSeen() {
+  try { localStorage.setItem(AUTH_SOFT_PROMPT_KEY, "1"); } catch (e) { /* ignore */ }
+}
+
+function closeAuthModal({ fromSoftDismiss = false } = {}) {
+  if (fromSoftDismiss || authModalSoft) markAuthSoftPromptSeen();
+  authModalSoft = false;
+  authModal.classList.remove("open");
+  setGoogleSigningIn(false);
+}
+
 async function openAuthModal(opts = {}) {
+  // Soft prompts (e.g. eval login gate) show at most once until the user
+  // dismisses them; explicit Sign in / gated actions always open.
+  if (opts.soft) {
+    if (authSoftPromptSeen()) return;
+    if (authModal.classList.contains("open")) return;
+    authModalSoft = true;
+    // Persist immediately so eval refreshes cannot reopen this modal.
+    markAuthSoftPromptSeen();
+  } else {
+    authModalSoft = false;
+  }
   if (!opts.keepMessages) {
     setMsg(authMsg, "");
     setMsg(authGoogleMsg, "");
@@ -3497,10 +3524,7 @@ authOpenBtn.onclick = () => openAuthModal();
 document.getElementById("auth-google-btn").onclick = () => startGoogleSignIn();
 document.getElementById("auth-login-btn").onclick = () => submitAuth("/api/login");
 document.getElementById("auth-register-btn").onclick = () => submitAuth("/api/register");
-document.getElementById("auth-cancel-btn").onclick = () => {
-  authModal.classList.remove("open");
-  setGoogleSigningIn(false);
-};
+document.getElementById("auth-cancel-btn").onclick = () => closeAuthModal({ fromSoftDismiss: true });
 document.getElementById("auth-password").addEventListener("keydown", e => {
   if (e.key === "Enter") submitAuth("/api/login");
 });
@@ -3554,7 +3578,12 @@ document.getElementById("profile-pw-btn").onclick = async () => {
 };
 
 authModal.addEventListener("click", e => {
-  if (e.target === authModal) authModal.classList.remove("open");
+  if (e.target === authModal) closeAuthModal({ fromSoftDismiss: true });
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && authModal?.classList.contains("open")) {
+    closeAuthModal({ fromSoftDismiss: true });
+  }
 });
 
 (async function restoreSession() {
