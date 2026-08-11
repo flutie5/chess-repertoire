@@ -59,6 +59,7 @@ function makeUserMove(from, to, promotion, opts = {}) {
     }
     if (state.practiceMode) {
       updatePracticeGameStatus();
+      schedulePracticeFeedback(fenBefore, played.san);
       schedulePracticeReply();
     }
   };
@@ -2413,6 +2414,12 @@ function appendGamesSection(lines, op) {
       render(activeFilter);
       const issues = collectScanIssues(batch, data.games);
       if (issues.length) openOpeningLesson(issues, 0);
+      saveMistakesAsPuzzles({
+        games: (data.games || []).map(sg => ({
+          ...sg,
+          san: batch[sg.index]?.san || [],
+        })),
+      });
     } catch (e) {
       if (handleProGateError(e)) {
         scanStatus.textContent = "Pro required to scan for opening mistakes.";
@@ -2855,10 +2862,16 @@ let googleIdentityReady = false;
 let googleSignInBusy = false;
 let googleWarmupPromise = null;
 let siteConfigPromise = null;   // shared cache for GET /api/auth/config (GA)
+let csrfToken = "";
 
 function fetchSiteConfig() {
   if (!siteConfigPromise) {
-    siteConfigPromise = api("/api/auth/config", "GET").catch(() => ({}));
+    siteConfigPromise = api("/api/auth/config", "GET")
+      .then((cfg) => {
+        if (cfg?.csrf_token) csrfToken = cfg.csrf_token;
+        return cfg || {};
+      })
+      .catch(() => ({}));
   }
   return siteConfigPromise;
 }
@@ -2959,6 +2972,7 @@ function openProfile() {
   setMsg(profileMsg, "");
   setMsg(profilePwMsg, "");
   if (currentUser.can_view_analytics) loadAnalyticsSummary();
+  loadAuthSessions();
   document.body.classList.add("profile-open");
   userMenu.classList.remove("open");
 }
@@ -2969,12 +2983,20 @@ function closeProfile() {
 
 async function api(path, method, body) {
   await ensureApiBase();
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  const m = (method || "GET").toUpperCase();
+  if (m !== "GET" && m !== "HEAD" && csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
   const opts = {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   };
   let resp = await fetchApi(path, opts);
+  const hdrToken = resp.headers.get("X-CSRF-Token");
+  if (hdrToken) csrfToken = hdrToken;
   let data;
   try {
     data = await readJson(resp);
@@ -2984,11 +3006,14 @@ async function api(path, method, body) {
     if (e.isProxyMiss && !apiBase && RENDER_API) {
       apiBase = RENDER_API;
       resp = await fetchApi(path, opts);
+      const hdr2 = resp.headers.get("X-CSRF-Token");
+      if (hdr2) csrfToken = hdr2;
       data = await readJson(resp);
     } else {
       throw e;
     }
   }
+  if (data?.csrf_token) csrfToken = data.csrf_token;
   if (!resp.ok) {
     const err = new Error(data.error || `HTTP ${resp.status}`);
     err.status = resp.status;
@@ -3003,9 +3028,11 @@ async function apiScanBlunders(body, onStatus) {
   await ensureApiBase();
 
   async function startJob() {
+    const headers = { "Content-Type": "application/json" };
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
     const opts = {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     };
     let resp = await fetchApi("/api/scan-blunders/jobs", opts);
@@ -5237,6 +5264,11 @@ async function refreshRepSlipups() {
       renderRepSlipups();
     }
     renderPracticeList();
+    const puzzleGames = (data.games || []).map(sg => ({
+      ...sg,
+      san: batchMeta[sg.index]?.game?.san || [],
+    }));
+    saveMistakesAsPuzzles({ games: puzzleGames });
   } catch (e) {
     if (handleProGateError(e)) {
       setSlipupsStatus("Pro required to scan for early-opening slip-ups.");
@@ -5486,11 +5518,12 @@ async function runPracticeReply() {
   }
 
   practiceBusy = true;
-  document.getElementById("rep-practice-status").textContent = "Stockfish is thinking…";
+  document.getElementById("rep-practice-status").textContent = "Opponent is thinking…";
   try {
     const data = await api("/api/practice-move", "POST", {
       fen,
       elo: state.practiceElo || +document.getElementById("rep-difficulty").value || 1800,
+      style: "human",
     });
     if (!state.practiceMode) return;
     if (state.ply < state.sans.length) truncateToPly();
@@ -5561,6 +5594,7 @@ async function openRepertoire() {
   await ensureRepTree();
   renderPracticeList();
   scheduleRepSlipupsRefresh();
+  refreshHabits();
   requestAnimationFrame(syncSidebarToBoard);
 }
 
@@ -5592,6 +5626,274 @@ document.getElementById("rep-difficulty").onchange = e => {
   state.practiceElo = +e.target.value || 1800;
 };
 document.getElementById("rep-randomize-btn").onclick = () => openPracticeColorModal();
+document.getElementById("rep-train-today-btn")?.addEventListener("click", () => loadTrainToday());
+document.getElementById("rep-export-pgn-btn")?.addEventListener("click", () => exportRepertoirePgn());
+document.getElementById("rep-import-pgn-btn")?.addEventListener("click", () => importRepertoirePgn());
+document.getElementById("rep-coach-btn")?.addEventListener("click", () => runAiCoach());
+document.getElementById("profile-revoke-sessions-btn")?.addEventListener("click", () => revokeOtherSessions());
+
+let practiceFeedbackTimer = null;
+function schedulePracticeFeedback(fenBefore, san) {
+  clearTimeout(practiceFeedbackTimer);
+  if (!currentUser || !fenBefore || !san) return;
+  practiceFeedbackTimer = setTimeout(async () => {
+    if (!state.practiceMode) return;
+    try {
+      const fb = await api("/api/practice-feedback", "POST", { fen: fenBefore, san });
+      const st = document.getElementById("rep-practice-status");
+      if (!st || !state.practiceMode) return;
+      const label = fb.severity === "best"
+        ? "Best move!"
+        : `${fb.severity}${fb.best_san ? ` · better was ${fb.best_san}` : ""}`;
+      st.textContent = label;
+    } catch (_) { /* non-blocking */ }
+  }, 80);
+}
+
+async function refreshHabits() {
+  if (!currentUser) return;
+  try {
+    const h = await api("/api/me/habits", "GET");
+    const el = document.getElementById("rep-habits");
+    if (el) {
+      el.textContent = `Streak ${h.streak_days || 0} · today ${h.reviews_today || 0}`;
+    }
+  } catch (_) { /* ignore */ }
+}
+
+async function loadTrainToday() {
+  if (!currentUser) {
+    openAuthModal();
+    return;
+  }
+  const box = document.getElementById("rep-train-today");
+  if (!box) return;
+  box.hidden = false;
+  box.textContent = "Loading today's plan…";
+  try {
+    const plan = await api("/api/me/train-today", "GET");
+    const due = plan.steps?.[0]?.cards || [];
+    box.innerHTML = `<strong>${plan.headline || "Train today"}</strong>
+      <div>${due.length} cards due · ${plan.steps?.[1]?.lines?.length || 0} repertoire lines</div>
+      <button type="button" id="rep-review-due-btn">Review due cards</button>
+      <button type="button" id="rep-share-report-btn">Share last report</button>`;
+    document.getElementById("rep-review-due-btn")?.addEventListener("click", () => reviewDueCards(due));
+    document.getElementById("rep-share-report-btn")?.addEventListener("click", () => shareLastReport());
+    await refreshHabits();
+  } catch (e) {
+    if (!handleProGateError(e)) box.textContent = e.message || "Could not load plan";
+  }
+}
+
+async function reviewDueCards(cards) {
+  if (!cards?.length) {
+    document.getElementById("rep-practice-status").textContent = "No cards due — nice work.";
+    return;
+  }
+  const card = cards[0];
+  try {
+    const c = tryLoadChess(card.fen);
+    if (c) {
+      game = c;
+      gameRootFen = card.fen;
+      freeFen = null;
+      rebuildDerived();
+      state.ply = 0;
+      refreshBoard();
+    }
+  } catch (_) { /* ignore */ }
+  const guess = window.prompt(`${card.prompt || "Best move?"} (SAN)`, "");
+  if (guess == null) return;
+  const ok = (guess || "").trim() === (card.answer_san || "").trim();
+  try {
+    await api("/api/me/learning/review", "POST", {
+      card_id: card.id,
+      quality: ok ? 4 : 1,
+    });
+    document.getElementById("rep-practice-status").textContent = ok
+      ? `Correct: ${card.answer_san}`
+      : `Answer was ${card.answer_san || "—"}. Scheduled again.`;
+    await refreshHabits();
+    await loadTrainToday();
+  } catch (e) {
+    if (!handleProGateError(e)) {
+      document.getElementById("rep-practice-status").textContent = e.message;
+    }
+  }
+}
+
+async function exportRepertoirePgn() {
+  try {
+    await ensureApiBase();
+    const headers = {};
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    const resp = await fetchApi("/api/me/repertoire.pgn", { headers });
+    if (!resp.ok) {
+      const data = await readJson(resp).catch(() => ({}));
+      const err = new Error(data.error || `HTTP ${resp.status}`);
+      err.status = resp.status;
+      err.code = data.code;
+      throw err;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "repertoire.pgn";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    if (!handleProGateError(e)) alert(e.message || "Export failed");
+  }
+}
+
+async function importRepertoirePgn() {
+  if (!currentUser) {
+    openAuthModal();
+    return;
+  }
+  const pgn = window.prompt("Paste PGN to import into your repertoire:");
+  if (!pgn?.trim()) return;
+  try {
+    const data = await api("/api/me/repertoire/import-pgn", "POST", {
+      pgn,
+      color: state.repColor || "white",
+    });
+    state.myRepertoire = null;
+    await ensureRepTree();
+    renderPracticeList();
+    alert(`Imported ${data.imported || 0} line(s).`);
+  } catch (e) {
+    if (!handleProGateError(e)) alert(e.message || "Import failed");
+  }
+}
+
+async function runAiCoach() {
+  if (!state.report) {
+    alert("Analyze a username first for coach notes.");
+    return;
+  }
+  const box = document.getElementById("rep-train-today");
+  if (box) {
+    box.hidden = false;
+    box.textContent = "Asking coach…";
+  }
+  try {
+    const data = await api("/api/me/coach", "POST", {
+      white: state.report.white,
+      black: state.report.black,
+      priorities: state.report.priorities || [],
+    });
+    if (box) {
+      box.innerHTML = `<strong>AI coach</strong><pre style="white-space:pre-wrap;font:inherit;margin:8px 0 0">${
+        (data.markdown || "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))
+      }</pre>`;
+    }
+  } catch (e) {
+    if (box) box.textContent = e.message || "Coach unavailable";
+    else if (!handleProGateError(e)) alert(e.message || "Coach unavailable");
+  }
+}
+
+async function shareLastReport() {
+  if (!state.report) {
+    alert("Analyze a username first, then share.");
+    return;
+  }
+  try {
+    const data = await api("/api/report/share", "POST", {
+      report: state.report,
+      title: state.report.username || "Report",
+    });
+    const url = `${location.origin}${data.url || ("/?share=" + data.share_id)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Share link copied:\n" + url);
+    } catch (_) {
+      prompt("Share link", url);
+    }
+  } catch (e) {
+    alert(e.message || "Share failed");
+  }
+}
+
+async function saveMistakesAsPuzzles(scanResult) {
+  if (!currentUser) return;
+  if (currentUser.billing_enabled && !currentUser.is_pro) return;
+  const cards = [];
+  for (const g of scanResult?.games || []) {
+    for (const f of g.flags || []) {
+      if (!["blunder", "mistake"].includes(f.severity)) continue;
+      if (!f.best_san || !g.san?.length) continue;
+      try {
+        const c = new Chess();
+        for (let i = 0; i < (f.ply || 1) - 1; i++) {
+          if (!g.san[i]) break;
+          c.move(g.san[i]);
+        }
+        cards.push({
+          kind: "puzzle",
+          fen: c.fen(),
+          san_line: (g.san || []).slice(0, f.ply).join(" "),
+          prompt: `Find a better move (${f.severity})`,
+          answer_san: f.best_san,
+          opening: g.variation || "",
+        });
+      } catch (_) { /* skip */ }
+      if (cards.length >= 20) break;
+    }
+    if (cards.length >= 20) break;
+  }
+  if (!cards.length) return;
+  try {
+    await api("/api/me/learning/cards", "POST", { cards });
+  } catch (_) { /* best-effort */ }
+}
+
+async function loadAuthSessions() {
+  const el = document.getElementById("profile-sessions-list");
+  if (!el || !currentUser) return;
+  try {
+    const data = await api("/api/me/sessions", "GET");
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      el.textContent = "No tracked sessions yet.";
+      return;
+    }
+    el.innerHTML = sessions.map(s => {
+      const when = s.last_seen
+        ? new Date(Number(s.last_seen) * 1000).toLocaleString()
+        : "—";
+      const ua = (s.user_agent || "Unknown device").slice(0, 64);
+      return `<div>${s.current ? "<strong>This device</strong>" : ua} · ${when}</div>`;
+    }).join("");
+  } catch (_) {
+    el.textContent = "Could not load sessions.";
+  }
+}
+
+async function revokeOtherSessions() {
+  try {
+    await api("/api/me/sessions/revoke", "POST", { all: true });
+    // Keep current browser session via Flask cookie; just refresh list
+    await loadAuthSessions();
+    alert("Other sessions marked revoked.");
+  } catch (e) {
+    alert(e.message || "Could not revoke sessions");
+  }
+}
+
+async function loadSharedReportIfPresent() {
+  try {
+    const shareId = new URLSearchParams(location.search).get("share");
+    if (!shareId) return;
+    const data = await api(`/api/report/share/${encodeURIComponent(shareId)}`, "GET");
+    if (data?.report) applyReport(data.report);
+  } catch (e) {
+    console.warn("shared report load failed", e);
+  }
+}
+
 document.getElementById("practice-color-cancel").onclick = () => closePracticeColorModal();
 document.getElementById("practice-color-modal").addEventListener("click", e => {
   if (e.target.id === "practice-color-modal") closePracticeColorModal();
@@ -5769,5 +6071,6 @@ try {
   if (demo === "opening-lesson") {
     requestAnimationFrame(() => runOpeningLessonDemo());
   }
+  loadSharedReportIfPresent();
 } catch (e) { /* ignore */ }
 

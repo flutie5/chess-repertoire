@@ -61,8 +61,12 @@ from webapp.db import connect as db_connect  # noqa: E402
 from webapp.disk_cache import cache_stats, enforce_cache_quota  # noqa: E402
 from webapp.engine_pool import EnginePool, resolve_engine_path  # noqa: E402
 from webapp.job_store import JobStore  # noqa: E402
+from webapp.logging_util import configure_logging, init_sentry  # noqa: E402
 from webapp.migrate import run_migrations, should_auto_migrate  # noqa: E402
 from webapp.ratelimit import limiter  # noqa: E402
+
+_log = configure_logging()
+init_sentry()
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP_DIR = Path(__file__).resolve().parent
@@ -254,7 +258,12 @@ def _load_secret_key() -> str:
 
 
 app.secret_key = _load_secret_key()
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=90)
+# 14 days default (was 90); override with SESSION_DAYS
+try:
+    _session_days = max(1, int(os.environ.get("SESSION_DAYS", "14")))
+except ValueError:
+    _session_days = 14
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=_session_days)
 
 
 def _db() -> sqlite3.Connection:
@@ -322,6 +331,68 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_analytics_searches_created "
             "ON analytics_searches(created_at DESC)"
+        )
+        # Learning / habits / shares / sessions (also in Alembic 0002)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS learning_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'repertoire',
+                fen TEXT NOT NULL,
+                san_line TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL DEFAULT '',
+                answer_san TEXT NOT NULL DEFAULT '',
+                opening TEXT NOT NULL DEFAULT '',
+                ease REAL NOT NULL DEFAULT 2.5,
+                interval_days REAL NOT NULL DEFAULT 0,
+                repetitions INTEGER NOT NULL DEFAULT 0,
+                due_at REAL NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_learning_cards_due "
+            "ON learning_cards(user_id, due_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_habits (
+                user_id INTEGER PRIMARY KEY,
+                streak_days INTEGER NOT NULL DEFAULT 0,
+                best_streak INTEGER NOT NULL DEFAULT 0,
+                last_study_day TEXT,
+                reviews_today INTEGER NOT NULL DEFAULT 0,
+                study_day TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shared_reports (
+                share_id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                title TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                user_agent TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                revoked INTEGER NOT NULL DEFAULT 0
+            )
+            """
         )
         _migrate_users(conn)
 
@@ -850,7 +921,7 @@ def evaluate():
 @app.post("/api/practice-move")
 @limiter.limit("engine")
 def practice_move():
-    """Return one Stockfish move at a reduced Elo for repertoire practice."""
+    """Return a practice reply: human-like (Lichess) or reduced-Elo Stockfish."""
     _user, err = _require_pro()
     if err:
         return err
@@ -865,7 +936,6 @@ def practice_move():
     if board.is_game_over():
         return jsonify({"error": "game over"}), 400
 
-    # Prefer Elo (200-point steps). Legacy `level` 1..10 maps to ~1400..3200.
     level = 5
     elo = data.get("elo")
     if elo is None and data.get("level") is not None:
@@ -878,11 +948,32 @@ def practice_move():
         elo = int(elo if elo is not None else 1800)
     except (TypeError, ValueError):
         elo = 1800
-    # Stockfish UCI_Elo is typically ~1320–3190
     elo = max(1320, min(3190, elo))
-    # Stronger opponents get a bit more search time/depth
-    depth = 6 + (elo - 1320) // 200  # ~6..15
-    think_time = 0.25 + (elo - 1320) / 2000.0  # ~0.25..1.2s
+    style = (data.get("style") or "human").strip().lower()
+
+    # Prefer human replies from Lichess explorer (gap 33 / 44).
+    if style in ("human", "lichess", "auto"):
+        from repertoire import human_moves as hm
+
+        picked = hm.pick_human_move(board, elo=elo)
+        if picked:
+            return jsonify({
+                "from": picked["from"],
+                "to": picked["to"],
+                "promotion": picked["promotion"],
+                "san": picked["san"],
+                "fen": picked["fen"],
+                "level": level,
+                "elo": elo,
+                "source": picked["source"],
+                "games": picked.get("games"),
+            })
+        if style != "auto":
+            # Fall through to Stockfish if explorer empty
+            pass
+
+    depth = 6 + (elo - 1320) // 200
+    think_time = 0.25 + (elo - 1320) / 2000.0
 
     try:
         with _engine_pool.acquire(timeout=15) as engine:
@@ -919,6 +1010,7 @@ def practice_move():
         "fen": board.fen(),
         "level": level,
         "elo": elo,
+        "source": "stockfish",
     })
 
 
@@ -1822,6 +1914,30 @@ def _json_body() -> dict:
 def _login_user(user: sqlite3.Row) -> dict:
     session.permanent = True
     session["user_id"] = user["id"]
+    # Track server-side session for revoke UI (gap 48)
+    sid = secrets.token_urlsafe(24)
+    session["sid"] = sid
+    now = time.time()
+    ua = (request.headers.get("User-Agent") or "")[:200]
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    ip = forwarded or (request.remote_addr or "")
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO auth_sessions "
+                "(id, user_id, created_at, last_seen, user_agent, ip, revoked) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0)",
+                (sid, user["id"], now, now, ua, ip[:64]),
+            )
+    except Exception as exc:
+        print(f"WARNING: auth_sessions insert failed: {exc}", flush=True)
+    if hasattr(sys.modules[__name__], "_ensure_csrf"):
+        try:
+            _ensure_csrf()  # type: ignore[name-defined]
+        except Exception:
+            session.setdefault("csrf_token", secrets.token_urlsafe(32))
+    else:
+        session.setdefault("csrf_token", secrets.token_urlsafe(32))
     return _user_payload(user)
 
 
@@ -1831,11 +1947,13 @@ _GOOGLE_TOKEN_MAX_AGE_SEC = 5 * 60
 
 @app.get("/api/auth/config")
 def auth_config():
-    """Return GIS client ID, GA4 id, and a one-time nonce bound to this session."""
+    """Return GIS client ID, GA4 id, CSRF token, and a one-time nonce."""
     payload = {
         "google_client_id": GOOGLE_CLIENT_ID or None,
         "ga_measurement_id": GA_MEASUREMENT_ID or None,
         "nonce": None,
+        "csrf_token": session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+        "session_days": int(app.config["PERMANENT_SESSION_LIFETIME"].total_seconds() // 86400),
     }
     if GOOGLE_CLIENT_ID:
         nonce = secrets.token_urlsafe(32)
@@ -2364,6 +2482,11 @@ def change_password():
             (generate_password_hash(new), user["id"]),
         )
     return jsonify({"ok": True})
+
+
+from webapp.learning_api import register_learning_routes  # noqa: E402
+
+register_learning_routes(app)
 
 
 if __name__ == "__main__":

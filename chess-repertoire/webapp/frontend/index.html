@@ -196,6 +196,14 @@
     </div>
   </div>
 
+  <div class="profile-card" id="profile-sessions-card">
+    <h2>Active sessions</h2>
+    <div id="profile-sessions-list" class="rep-empty">Loading…</div>
+    <div class="modal-actions">
+      <button class="ghost" type="button" id="profile-revoke-sessions-btn">Sign out other sessions</button>
+    </div>
+  </div>
+
   <div class="profile-card">
     <h2>Session</h2>
     <div class="modal-actions">
@@ -388,7 +396,7 @@
   </aside>
 
   <section id="repertoire-practice" aria-label="Practice repertoire">
-    <h3>Practice vs Stockfish <span class="pro-chip" id="practice-pro-chip" hidden>Pro</span></h3>
+    <h3>Practice vs human-like AI <span class="pro-chip" id="practice-pro-chip" hidden>Pro</span></h3>
     <div class="rep-practice-toolbar">
       <label>Difficulty
         <select id="rep-difficulty" title="Opponent Elo">
@@ -406,8 +414,14 @@
       <button type="button" id="rep-randomize-btn" title="Practice a random opening from your repertoire">
         Practice All
       </button>
+      <button type="button" id="rep-train-today-btn" title="Today's spaced review + drills">Train today</button>
+      <button type="button" id="rep-export-pgn-btn" title="Download repertoire PGN">Export PGN</button>
+      <button type="button" id="rep-import-pgn-btn" title="Import repertoire from PGN">Import PGN</button>
+      <button type="button" id="rep-coach-btn" title="AI coach notes from your last report">AI coach</button>
+      <span id="rep-habits" class="rep-empty"></span>
       <span id="rep-practice-status" class="rep-empty"></span>
     </div>
+    <div id="rep-train-today" class="rep-empty" hidden></div>
     <div class="rep-practice-list-label">Your openings</div>
     <div class="rep-practice-list" id="rep-practice-list">
       <div class="rep-empty">No openings saved yet. Add some from the tree on the right.</div>
