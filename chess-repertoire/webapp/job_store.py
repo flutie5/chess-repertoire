@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from webapp.db import connect as db_connect
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
@@ -39,9 +41,7 @@ class JobStore:
         self._ensure_table()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return db_connect(self.db_path)
 
     def _ensure_table(self) -> None:
         with self._connect() as conn:

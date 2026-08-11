@@ -1,7 +1,10 @@
 # Local secrets and runtime data
 webapp/.secret_key
 webapp/users.db
+webapp/users.db-wal
+webapp/users.db-shm
 .chesscom-cache/
+backups/
 
 # Environment
 .env
@@ -17,10 +20,10 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Node (Playwright etc.)
+# Node (frontend tooling under webapp/frontend/)
 node_modules/
-package-lock.json
-package.json
+webapp/frontend/node_modules/
+# Keep webapp/frontend/package.json and package-lock.json tracked.
 
 # Engine binaries (download via scripts/download_stockfish.sh on deploy)
 engine/

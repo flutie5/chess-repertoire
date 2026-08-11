@@ -154,6 +154,28 @@ No Render domain changes are required — only Netlify serves the public site; A
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
 - [ ] In-flight report jobs survive a brief restart (rows in `async_jobs`)
 
+## SQLite durability (single-node)
+
+Opening Explorer keeps **SQLite** on the Render disk (`DATA_DIR=/data`). Connections use **WAL** + `busy_timeout`. Schema changes go through **Alembic** (`alembic/`); on boot, non-production runs `alembic upgrade head` unless `AUTO_MIGRATE=0`. In production, run migrations as a release step:
+
+```bash
+cd chess-repertoire
+DATA_DIR=/data alembic upgrade head
+```
+
+**Backups** (copy off-box nightly):
+
+```bash
+DATA_DIR=/data bash scripts/backup_sqlite.sh /secure/backups
+# Windows: .\scripts\backup_sqlite.ps1 -OutDir D:\backups
+```
+
+Prefer `sqlite3 .backup` when available. Test a restore monthly. Also keep Stripe customer/subscription IDs reconcilable from the Dashboard if `users.db` is lost.
+
+**Cache quotas:** `.chesscom-cache` is pruned by `CACHE_MAX_MB` / `CACHE_MAX_FILES` (defaults 400 MB / 2000 files). `/api/health` reports `disk_cache`.
+
+**Scale limit:** SQLite + in-process LRU caches + Stockfish pool remain **single-instance**. Do not raise Gunicorn workers or add a second node until Postgres (and shared cache/queue) exist.
+
 ## Local development (unchanged)
 
 ```bash
@@ -163,6 +185,17 @@ python webapp/app.py
 ```
 
 Uses `webapp/.secret_key`, `webapp/users.db`, repo-root `.chesscom-cache`, and Windows `engine/**/stockfish*.exe` if present.
+
+### Frontend (Vite + TypeScript)
+
+```bash
+cd webapp/frontend
+npm ci
+npm run dev          # :5173, proxies /api → Flask :5000
+npm run build        # writes production assets into webapp/static
+```
+
+Netlify runs `npm ci && npm run build` with publish `webapp/static`.
 
 ## Optional: direct API access (no proxy)
 

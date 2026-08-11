@@ -57,8 +57,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from repertoire import analyze, classify, fetch, lichess, moves, openings, parse  # noqa: E402
 from webapp.cache_util import BoundedLRU  # noqa: E402
+from webapp.db import connect as db_connect  # noqa: E402
+from webapp.disk_cache import cache_stats, enforce_cache_quota  # noqa: E402
 from webapp.engine_pool import EnginePool, resolve_engine_path  # noqa: E402
 from webapp.job_store import JobStore  # noqa: E402
+from webapp.migrate import run_migrations, should_auto_migrate  # noqa: E402
 from webapp.ratelimit import limiter  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -255,9 +258,7 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=90)
 
 
 def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_connect(DB_PATH)
 
 
 def _init_db() -> None:
@@ -352,6 +353,11 @@ def _migrate_users(conn: sqlite3.Connection) -> None:
 
 
 _init_db()
+if should_auto_migrate():
+    try:
+        run_migrations()
+    except Exception as exc:
+        print(f"WARNING: alembic migrate failed: {exc}", flush=True)
 
 # Durable async jobs (report / scan) — survives process logic better than RAM dicts.
 _job_store = JobStore(DB_PATH)
@@ -600,6 +606,10 @@ def _load_games(username: str, months: int):
             return _games_cache[key]
     raw = fetch.fetch_games(username, months=months, cache_dir=CACHE_DIR,
                             verbose=False)
+    try:
+        enforce_cache_quota(CACHE_DIR)
+    except Exception as exc:
+        print(f"WARNING: cache quota enforce failed: {exc}", flush=True)
     games = []
     for r in raw:
         g = parse.parse_game(r, username)
@@ -727,12 +737,17 @@ def health():
     except Exception:
         pending = -1
     status_code = 200 if disk_ok else 503
+    try:
+        disk_cache = cache_stats(CACHE_DIR)
+    except Exception:
+        disk_cache = {"files": -1, "bytes": -1}
     return jsonify({
         "ok": disk_ok,
         "ready": bool(pool.get("ok")) and disk_ok,
         "engine_pool": pool,
         "jobs_pending": pending,
         "disk_ok": disk_ok,
+        "disk_cache": disk_cache,
     }), status_code
 
 
