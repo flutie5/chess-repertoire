@@ -37,7 +37,12 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | Runtime | Python 3 |
 | Build command | `pip install -r requirements.txt && bash scripts/download_stockfish.sh` |
 | Start command | `gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` |
+| Health check | `/api/health` |
 | Root directory | repo root |
+
+**Keep `--workers 1`.** Report/scan jobs are durable in SQLite (`async_jobs`), but the Stockfish engine pool is in-process. Multiple Gunicorn workers would multiply engine processes and fragment rate-limit state. Raise workers only after engines move off the web process.
+
+**Plan:** Free tier sleeps and is fine for demos. For real traffic, upgrade to a paid always-on Render plan before any growth campaign.
 
 **Environment variables (Render)**
 
@@ -46,10 +51,21 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | `FLASK_ENV` | `production` |
 | `SECRET_KEY` | Generate a random 64-char hex string (Render can auto-generate) |
 | `DATA_DIR` | `/data` |
+| `ENGINE_POOL_SIZE` | `2` (concurrent Stockfish processes in this worker) |
+| `JOB_WORKERS` | `2` (thread pool for report/scan jobs) |
+| `ENGINE_THREADS` / `ENGINE_HASH_MB` | `1` / `16` (raise on paid CPU) |
+| `RATE_LIMIT_ENGINE` / `REPORT` / `AUTH` | per-minute caps (defaults 30 / 10 / 20) |
+| `CURRENT_MONTH_CACHE_SECONDS` | `900` — short TTL for chess.com current-month disk cache |
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Web client ID from Google Cloud Console (for Sign in with Google) |
-| `ANALYTICS_ADMIN_EMAIL` | Your login email — unlocks Admin in Profile (account list, set temporary passwords) |
+| `ANALYTICS_ADMIN_EMAIL` | Your login email — unlocks ops tools in Profile (account roster, password reset) |
+| `POSTHOG_PROJECT_API_KEY` | PostHog **project** API key — product analytics (People, Insights, Retention, Replay). Public by design. |
+| `POSTHOG_HOST` | Optional. Default `https://us.i.posthog.com`. Use `https://eu.i.posthog.com` for EU cloud. |
 
-Add a **persistent disk** mounted at `/data` (1 GB) so `users.db` and `.chesscom-cache` survive redeploys.
+Add a **persistent disk** mounted at `/data` (1 GB) so `users.db`, job rows, and `.chesscom-cache` survive redeploys.
+
+### API domain / CORS
+
+Prefer the Netlify `/api/*` proxy (same-origin cookies). If the SPA must call Render directly, set `PUBLIC_APP_URL` + `CORS_ORIGINS`, and optionally inject a frontend API base via `window.OPENING_EXPLORER_API` or `<meta name="opening-explorer-api" content="https://…">` (no hardcoded Render host in the SPA).
 
 ### Google Sign-In setup
 
@@ -72,17 +88,47 @@ python -m pytest tests/test_auth_google.py -v
 
 Note the service URL, e.g. `https://chess-repertoire-api.onrender.com`.
 
-### Google Analytics (GA4) setup
+### Product analytics (PostHog) — who is using the app
 
-The self-hosted "Site visits" admin panel (Profile page) is fine for a quick
-glance, but for full traffic/audience reporting like major sites use, this app
-also reports to Google Analytics.
+This is the industry-standard path for **signed-in users, funnels, retention, and
+person profiles (email)**. Do not rely on the Profile ops panel or a CSV export
+for product reporting.
 
-The production Measurement ID (`G-147LHEVMW7`, from a GA4 property → Web data
-stream) is already baked into `webapp/app.py` as the default used whenever
-`FLASK_ENV=production` — **no Render dashboard step is required**. Local/dev
-runs (`FLASK_ENV` unset) never report to it, so testing never pollutes real
-traffic data.
+1. Create a free project at [PostHog US](https://us.posthog.com) or [EU](https://eu.posthog.com)
+2. **Project settings → Project API Key** (starts with `phc_…`) — this is a
+   public client key, same class as a GA4 measurement ID
+3. On Render, set:
+   - `POSTHOG_PROJECT_API_KEY=phc_…`
+   - `POSTHOG_HOST=https://us.i.posthog.com` (or `https://eu.i.posthog.com`)
+4. Redeploy the API, then rebuild/redeploy the frontend static assets so the
+   SPA picks up the SDK wiring
+5. Open the live site, sign up / analyze once, then in PostHog check:
+   - **Activity** → live events (`$pageview`, `user_signed_up`, `report_analyzed`, …)
+   - **People** → person profile with `email`, `plan`, `auth_provider`
+   - **Product analytics → Insights / Retention** for dashboards
+
+The SPA uses the official `posthog-js` SDK: `identify(user.id)` on login with
+email as a person property, `reset()` on logout, and named product events for
+signup, login, report analyze, and checkout start. Your `ANALYTICS_ADMIN_EMAIL`
+account is opted out (same as GA).
+
+### Google Analytics (GA4) — traffic / audience
+
+GA4 answers “how many visitors / where from?” — not “which emails signed up.”
+Use PostHog for the latter.
+
+A production Measurement ID (`G-147LHEVMW7`) is baked into `webapp/app.py` when
+`FLASK_ENV=production`. Local/dev never reports unless you set
+`GA_MEASUREMENT_ID` explicitly.
+
+Offline CSV of the SQLite roster (ops escape hatch only):
+
+```bash
+cd chess-repertoire
+python scripts/export_users.py -o users.csv
+# or with a persistent disk:
+DATA_DIR=/data python scripts/export_users.py -o users.csv
+```
 
 - To point at a **different** GA4 property (e.g. your own, or a staging
   property), set `GA_MEASUREMENT_ID` on Render (Environment tab) to override
@@ -129,13 +175,38 @@ No Render domain changes are required — only Netlify serves the public site; A
 ## 6. First-deploy verification
 
 - [ ] Render service is **Live** (check Logs for Stockfish install + Gunicorn start)
+- [ ] `https://YOUR-SERVICE.onrender.com/api/health` returns JSON with `ok` / `engine_pool`
 - [ ] `https://YOUR-SERVICE.onrender.com/api/me` returns `401` JSON (not 502)
 - [ ] Netlify site loads at `https://YOUR-SITE.netlify.app`
 - [ ] Register / login works (session cookie on Netlify domain)
 - [ ] Continue with Google works (origins + `GOOGLE_CLIENT_ID` configured)
 - [ ] Analyze a username — report loads (chess.com fetch + cache)
-- [ ] Board eval bar works (Stockfish via `/api/eval`)
+- [ ] Sign in, then board eval bar works (`/api/eval` requires login)
+- [ ] Deep review (annotate / scan) requires Pro when Stripe is configured
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
+- [ ] In-flight report jobs survive a brief restart (rows in `async_jobs`)
+
+## SQLite durability (single-node)
+
+Opening Explorer keeps **SQLite** on the Render disk (`DATA_DIR=/data`). Connections use **WAL** + `busy_timeout`. Schema changes go through **Alembic** (`alembic/`); on boot, non-production runs `alembic upgrade head` unless `AUTO_MIGRATE=0`. In production, run migrations as a release step:
+
+```bash
+cd chess-repertoire
+DATA_DIR=/data alembic upgrade head
+```
+
+**Backups** (copy off-box nightly):
+
+```bash
+DATA_DIR=/data bash scripts/backup_sqlite.sh /secure/backups
+# Windows: .\scripts\backup_sqlite.ps1 -OutDir D:\backups
+```
+
+Prefer `sqlite3 .backup` when available. Test a restore monthly. Also keep Stripe customer/subscription IDs reconcilable from the Dashboard if `users.db` is lost.
+
+**Cache quotas:** `.chesscom-cache` is pruned by `CACHE_MAX_MB` / `CACHE_MAX_FILES` (defaults 400 MB / 2000 files). `/api/health` reports `disk_cache`.
+
+**Scale limit:** SQLite + in-process LRU caches + Stockfish pool remain **single-instance**. Do not raise Gunicorn workers or add a second node until Postgres (and shared cache/queue) exist.
 
 ## Local development (unchanged)
 
@@ -146,6 +217,17 @@ python webapp/app.py
 ```
 
 Uses `webapp/.secret_key`, `webapp/users.db`, repo-root `.chesscom-cache`, and Windows `engine/**/stockfish*.exe` if present.
+
+### Frontend (Vite + TypeScript)
+
+```bash
+cd webapp/frontend
+npm ci
+npm run dev          # :5173, proxies /api → Flask :5000
+npm run build        # writes production assets into webapp/static
+```
+
+Netlify runs `npm ci && npm run build` with publish `webapp/static`.
 
 ## Optional: direct API access (no proxy)
 

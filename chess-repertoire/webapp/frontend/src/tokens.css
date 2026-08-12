@@ -1,0 +1,44 @@
+/* Design tokens live primarily in styles.css :root / [data-board-theme].
+   This file adds shared utility tokens for the Vite SPA. */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sq[data-focused="1"] {
+  outline: 2px solid var(--green, #4d8fd9);
+  outline-offset: -2px;
+}
+
+.board-a11y-help {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.board-a11y-help summary {
+  cursor: pointer;
+  list-style: none;
+}
+.board-a11y-help p {
+  max-width: 220px;
+  margin: 6px 0 0;
+  line-height: 1.35;
+}

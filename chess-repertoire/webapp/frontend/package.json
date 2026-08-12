@@ -1,0 +1,20 @@
+{
+  "name": "opening-explorer-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-pwa": "^0.21.1"
+  },
+  "dependencies": {
+    "posthog-js": "^1.416.0"
+  }
+}

@@ -1,18 +1,15 @@
-# Netlify config at the GitHub repo root (this monorepo nests the app
-# under chess-repertoire/). Publish the static frontend and proxy /api/* to Render.
+# Netlify config at the GitHub repo root (app lives under chess-repertoire/).
 
 [build]
+  command = "cd chess-repertoire/webapp/frontend && npm ci && npm run build"
   publish = "chess-repertoire/webapp/static"
-  # No build command — static files only.
 
-# Proxy API calls to Render so the browser sees a single origin (Netlify domain).
 [[redirects]]
   from = "/api/*"
   to = "https://chess-repertoire-bteo.onrender.com/api/:splat"
   status = 200
   force = true
 
-# SPA fallback — existing files (/, /vendor/*, /pieces/*) are served first.
 [[redirects]]
   from = "/*"
   to = "/index.html"

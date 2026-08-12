@@ -6,4 +6,6 @@ flask-cors>=4.0
 google-auth>=2.29
 python-dotenv>=1.0
 stripe>=11.0
-
+alembic>=1.13
+SQLAlchemy>=2.0
+# Optional observability: pip install 'sentry-sdk[flask]' and set SENTRY_DSN

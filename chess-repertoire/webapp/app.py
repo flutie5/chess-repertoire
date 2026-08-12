@@ -15,23 +15,28 @@ move sequence (proxied from the Lichess opening explorer, cached).
 
 POST /api/scan-blunders scans opening moves in a batch of games for
 inaccuracies/mistakes/blunders and returns per-game flags plus repeated
-patterns within the same variation.
+patterns within the same variation. Prefer POST /api/scan-blunders/jobs
+(+ GET .../jobs/<id>) behind Netlify — the sync route can exceed the
+~26s proxy timeout on larger batches.
 
 POST /api/annotate-game runs a full-game Stockfish review and returns
 chess.com-style move annotations (blunder/mistake/great/best/brilliant).
 
 Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
-/api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync and
-practice-move. Game review (annotate-*) stays free.
+/api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync,
+practice-move, and deep Stockfish review (annotate-*, scan-blunders*).
+Light /api/eval requires login.
 
 Analytics / admin (free, self-hosted): POST /api/analytics/hit,
 GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
+GET /api/analytics/users.csv (download signup emails; admin only),
 POST /api/admin/users/<id>/password (admin set temporary password).
 """
 
 from __future__ import annotations
 
 import atexit
+import csv
 import hashlib
 import os
 import re
@@ -42,17 +47,29 @@ import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 
 import chess
 import chess.engine
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, Response, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from repertoire import analyze, classify, fetch, lichess, moves, openings, parse  # noqa: E402
+from webapp.cache_util import BoundedLRU  # noqa: E402
+from webapp.db import connect as db_connect  # noqa: E402
+from webapp.disk_cache import cache_stats, enforce_cache_quota  # noqa: E402
+from webapp.engine_pool import EnginePool, resolve_engine_path  # noqa: E402
+from webapp.job_store import JobStore  # noqa: E402
+from webapp.logging_util import configure_logging, init_sentry  # noqa: E402
+from webapp.migrate import run_migrations, should_auto_migrate  # noqa: E402
+from webapp.ratelimit import limiter  # noqa: E402
+
+_log = configure_logging()
+init_sentry()
 
 ROOT = Path(__file__).resolve().parent.parent
 WEBAPP_DIR = Path(__file__).resolve().parent
@@ -146,15 +163,39 @@ def _origin_allowed(origin: str) -> bool:
 @app.after_request
 def _cors_netlify_fallback(resp):
     """Allow frontends to call the Render API if the /api proxy is broken."""
-    if "Access-Control-Allow-Origin" in resp.headers:
-        return resp
-    origin = request.headers.get("Origin") or ""
-    if _origin_allowed(origin):
-        resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        resp.headers["Vary"] = "Origin"
+    if "Access-Control-Allow-Origin" not in resp.headers:
+        origin = request.headers.get("Origin") or ""
+        if _origin_allowed(origin):
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            resp.headers["Vary"] = "Origin"
+
+    # Cache-Control: public short TTL for opening book; no-store for private APIs.
+    path = request.path or ""
+    if path.startswith("/api/"):
+        if path == "/api/opening" or path.startswith("/api/opening?"):
+            resp.headers.setdefault("Cache-Control", "public, max-age=300")
+        elif path == "/api/health" or path == "/api/engine-status":
+            resp.headers.setdefault("Cache-Control", "no-store")
+        elif path == "/api/auth/config":
+            # Nonce is session-bound; never cache.
+            resp.headers.setdefault("Cache-Control", "no-store")
+        elif (
+            "/jobs" in path
+            or path.startswith("/api/me")
+            or path.startswith("/api/auth/")
+            or path.startswith("/api/billing/")
+            or path.startswith("/api/admin/")
+            or path.startswith("/api/analytics/")
+            or path.startswith("/api/report")
+            or path.startswith("/api/eval")
+            or path.startswith("/api/annotate")
+            or path.startswith("/api/scan-blunders")
+            or path.startswith("/api/practice-move")
+        ):
+            resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
 
@@ -220,13 +261,16 @@ def _load_secret_key() -> str:
 
 
 app.secret_key = _load_secret_key()
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=90)
+# 14 days default (was 90); override with SESSION_DAYS
+try:
+    _session_days = max(1, int(os.environ.get("SESSION_DAYS", "14")))
+except ValueError:
+    _session_days = 14
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=_session_days)
 
 
 def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return db_connect(DB_PATH)
 
 
 def _init_db() -> None:
@@ -291,6 +335,68 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_analytics_searches_created "
             "ON analytics_searches(created_at DESC)"
         )
+        # Learning / habits / shares / sessions (also in Alembic 0002)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS learning_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'repertoire',
+                fen TEXT NOT NULL,
+                san_line TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL DEFAULT '',
+                answer_san TEXT NOT NULL DEFAULT '',
+                opening TEXT NOT NULL DEFAULT '',
+                ease REAL NOT NULL DEFAULT 2.5,
+                interval_days REAL NOT NULL DEFAULT 0,
+                repetitions INTEGER NOT NULL DEFAULT 0,
+                due_at REAL NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_learning_cards_due "
+            "ON learning_cards(user_id, due_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_habits (
+                user_id INTEGER PRIMARY KEY,
+                streak_days INTEGER NOT NULL DEFAULT 0,
+                best_streak INTEGER NOT NULL DEFAULT 0,
+                last_study_day TEXT,
+                reviews_today INTEGER NOT NULL DEFAULT 0,
+                study_day TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shared_reports (
+                share_id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                title TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                user_agent TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                revoked INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         _migrate_users(conn)
 
 
@@ -321,6 +427,15 @@ def _migrate_users(conn: sqlite3.Connection) -> None:
 
 
 _init_db()
+if should_auto_migrate():
+    try:
+        run_migrations()
+    except Exception as exc:
+        print(f"WARNING: alembic migrate failed: {exc}", flush=True)
+
+# Durable async jobs (report / scan) — survives process logic better than RAM dicts.
+_job_store = JobStore(DB_PATH)
+atexit.register(lambda: _job_store.shutdown(wait=False))
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 ANALYTICS_ADMIN_EMAIL = os.environ.get("ANALYTICS_ADMIN_EMAIL", "").strip().lower()
@@ -334,6 +449,35 @@ _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID = "G-147LHEVMW7"
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "").strip()
 if not GA_MEASUREMENT_ID and IS_PRODUCTION:
     GA_MEASUREMENT_ID = _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID
+
+# PostHog product analytics (industry-standard dashboards: People, Insights,
+# Retention, Session Replay). Project API key is public by design (same class
+# as a GA4 measurement ID). Create a project at https://us.posthog.com (or EU)
+# → Project settings → Project API Key. Off unless POSTHOG_PROJECT_API_KEY is set.
+POSTHOG_PROJECT_API_KEY = os.environ.get("POSTHOG_PROJECT_API_KEY", "").strip()
+POSTHOG_HOST = (
+    os.environ.get("POSTHOG_HOST", "").strip()
+    or "https://us.i.posthog.com"
+)
+
+
+def _user_account_count() -> int:
+    with _db() as conn:
+        return int(conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
+
+
+try:
+    _boot_accounts = _user_account_count()
+    print(f"[opening-explorer] user_accounts={_boot_accounts}", flush=True)
+except Exception as _boot_exc:
+    print(f"[opening-explorer] user_accounts_error={_boot_exc}", flush=True)
+if not ANALYTICS_ADMIN_EMAIL:
+    print(
+        "[opening-explorer] ANALYTICS_ADMIN_EMAIL is unset — "
+        "Admin panel (account list) is hidden for everyone. "
+        "Set it on Render to your login email.",
+        flush=True,
+    )
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -495,6 +639,7 @@ def _user_payload(user: sqlite3.Row) -> dict:
     plan_expires_at = _user_col(user, "plan_expires_at")
     is_pro = _is_pro(user) or not _billing_configured()
     return {
+        "id": int(user["id"]),
         "email": user["email"],
         "display_name": display or "",
         "chesscom_username": user["chesscom_username"],
@@ -510,91 +655,34 @@ def _user_payload(user: sqlite3.Row) -> dict:
         "billing_enabled": _billing_configured(),
         "trial_days": TRIAL_DAYS,
         "can_view_analytics": _can_view_analytics(user),
+        "created_at": int(user["created_at"] or 0) if "created_at" in keys else 0,
     }
 
-# In-memory cache of parsed games + move lists per (username, months).
-_games_cache: dict = {}
+# Bounded in-process caches (shared only within this worker process).
+_games_cache: BoundedLRU = BoundedLRU(maxsize=64)
 _cache_lock = threading.Lock()
 
-# ---- Stockfish ----
+# ---- Stockfish pool ----
 
-_engine: chess.engine.SimpleEngine | None = None
-_engine_lock = threading.Lock()
-_eval_cache: dict[str, dict] = {}
-_scan_eval_cache: dict[str, dict] = {}  # shallower depth cache for blunder scans
-_scan_cache: dict[str, dict] = {}       # game-key -> scan result
-_annotate_eval_cache: dict[str, list] = {}  # fen+depth -> multipv lines
-_annotate_cache: dict[str, list] = {}       # san-key -> annotations
-_opening_cache: dict[str, dict] = {}    # UCI play string -> {name, eco}
+_engine_pool = EnginePool(resolve_engine_path(ROOT))
+atexit.register(_engine_pool.shutdown)
 
-
-def _engine_path() -> Path | None:
-    override = os.environ.get("STOCKFISH_PATH", "").strip()
-    if override:
-        path = Path(override)
-        return path if path.is_file() else None
-    engine_dir = ROOT / "engine"
-    exes = sorted(engine_dir.rglob("stockfish*.exe"))
-    if exes:
-        return exes[0]
-    for path in sorted(engine_dir.rglob("stockfish")):
-        if path.is_file() and path.suffix.lower() != ".exe":
-            return path
-    return None
+_eval_cache: BoundedLRU = BoundedLRU(maxsize=512)
+_scan_eval_cache: BoundedLRU = BoundedLRU(maxsize=1024)
+_scan_cache: BoundedLRU = BoundedLRU(maxsize=256)
+_annotate_eval_cache: BoundedLRU = BoundedLRU(maxsize=1024)
+_annotate_cache: BoundedLRU = BoundedLRU(maxsize=128)
+_opening_cache: BoundedLRU = BoundedLRU(maxsize=512)
 
 
-def _configure_engine(engine: chess.engine.SimpleEngine) -> None:
-    """Free-tier-friendly defaults: one thread, small hash, full strength."""
-    try:
-        engine.configure({
-            "Threads": 1,
-            "Hash": 16,
-            "UCI_LimitStrength": False,
-            "Skill Level": 20,
-        })
-    except Exception as exc:
-        print(f"WARNING: Stockfish configure failed: {exc}", flush=True)
-
-
-def _get_engine() -> chess.engine.SimpleEngine | None:
-    global _engine
-    if _engine is None:
-        path = _engine_path()
-        if path is None:
-            print("WARNING: Stockfish binary not found under engine/", flush=True)
-            return None
-        try:
-            print(f"Starting Stockfish at {path}", flush=True)
-            _engine = chess.engine.SimpleEngine.popen_uci(str(path))
-            _configure_engine(_engine)
-        except Exception as exc:
-            print(f"WARNING: failed to start Stockfish at {path}: {exc}", flush=True)
-            _engine = None
-            return None
-    return _engine
-
-
-def _reset_engine_limits(engine: chess.engine.SimpleEngine) -> None:
-    """Clear practice-mode strength limits before a full-strength analyse."""
-    _configure_engine(engine)
-
-
-def _reset_engine():
-    """Drop a dead engine handle so the next call restarts Stockfish."""
-    global _engine
-    if _engine is not None:
-        try:
-            _engine.quit()
-        except Exception:
-            pass
-        _engine = None
-
-
-def _shutdown_engine():
-    _reset_engine()
-
-
-atexit.register(_shutdown_engine)
+def _engine_busy_response():
+    resp = jsonify({
+        "error": "Engine pool busy — try again shortly",
+        "code": "engine_busy",
+    })
+    resp.status_code = 429
+    resp.headers["Retry-After"] = "5"
+    return resp
 
 
 def _load_games(username: str, months: int):
@@ -604,6 +692,10 @@ def _load_games(username: str, months: int):
             return _games_cache[key]
     raw = fetch.fetch_games(username, months=months, cache_dir=CACHE_DIR,
                             verbose=False)
+    try:
+        enforce_cache_quota(CACHE_DIR)
+    except Exception as exc:
+        print(f"WARNING: cache quota enforce failed: {exc}", flush=True)
     games = []
     for r in raw:
         g = parse.parse_game(r, username)
@@ -714,29 +806,76 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+@app.get("/api/health")
+def health():
+    """Liveness/readiness for Render and load balancers."""
+    pool = _engine_pool.status()
+    disk_ok = True
+    try:
+        probe = CACHE_DIR / ".health_probe"
+        probe.write_text("ok")
+        probe.unlink(missing_ok=True)
+    except OSError:
+        disk_ok = False
+    pending = 0
+    try:
+        pending = _job_store.pending_count()
+    except Exception:
+        pending = -1
+    status_code = 200 if disk_ok else 503
+    try:
+        disk_cache = cache_stats(CACHE_DIR)
+    except Exception:
+        disk_cache = {"files": -1, "bytes": -1}
+    return jsonify({
+        "ok": disk_ok,
+        "ready": bool(pool.get("ok")) and disk_ok,
+        "engine_pool": pool,
+        "jobs_pending": pending,
+        "disk_ok": disk_ok,
+        "disk_cache": disk_cache,
+    }), status_code
+
+
 @app.get("/api/engine-status")
 def engine_status():
     """Deploy health check: can we find/start Stockfish?"""
-    path = _engine_path()
-    if path is None:
-        return jsonify({"ok": False, "error": "Stockfish binary not found", "path": None}), 503
     try:
-        with _engine_lock:
-            engine = _get_engine()
-            if engine is None:
-                return jsonify({
-                    "ok": False,
-                    "error": "Stockfish failed to start",
-                    "path": str(path),
-                }), 503
-        return jsonify({"ok": True, "path": str(path)})
-    except Exception as exc:
-        _reset_engine()
-        return jsonify({"ok": False, "error": str(exc), "path": str(path)}), 500
+        user_accounts = _user_account_count()
+    except Exception:
+        user_accounts = None
+    pool = _engine_pool.status(start=True)
+    if not pool.get("path"):
+        return jsonify({
+            "ok": False,
+            "error": "Stockfish binary not found",
+            "path": None,
+            "user_accounts": user_accounts,
+            "engine_pool": pool,
+        }), 503
+    if not pool.get("ok"):
+        return jsonify({
+            "ok": False,
+            "error": "Stockfish failed to start",
+            "path": pool.get("path"),
+            "user_accounts": user_accounts,
+            "engine_pool": pool,
+        }), 503
+    return jsonify({
+        "ok": True,
+        "path": pool.get("path"),
+        "user_accounts": user_accounts,
+        "admin_email_configured": bool(ANALYTICS_ADMIN_EMAIL),
+        "engine_pool": pool,
+    })
 
 
 @app.get("/api/eval")
+@limiter.limit("engine")
 def evaluate():
+    user, err = _require_login()
+    if err:
+        return err
     fen = (request.args.get("fen") or "").strip()
     if not fen:
         return jsonify({"error": "fen is required"}), 400
@@ -753,20 +892,14 @@ def evaluate():
         return jsonify(_eval_cache[key])
 
     try:
-        with _engine_lock:
-            engine = _get_engine()
-            if engine is None:
-                return jsonify({"error": "Stockfish engine not found"}), 503
-            _reset_engine_limits(engine)
-            try:
+        try:
+            with _engine_pool.acquire(timeout=15) as engine:
+                _engine_pool.configure_full_strength(engine)
                 info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
-            except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
-                _reset_engine()
-                engine = _get_engine()
-                if engine is None:
-                    return jsonify({"error": "Stockfish engine not found"}), 503
-                _reset_engine_limits(engine)
-                info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
+        except TimeoutError:
+            return _engine_busy_response()
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
 
         if "score" not in info:
             return jsonify({"error": "engine returned no score"}), 500
@@ -786,8 +919,8 @@ def evaluate():
                 pv_san = " ".join(m.uci() for m in pv[:8])
 
         result = {
-            "cp": score.score(),                      # None if forced mate
-            "mate": score.mate(),                     # None unless forced mate
+            "cp": score.score(),
+            "mate": score.mate(),
             "depth": info.get("depth", EVAL_DEPTH),
             "best_san": best_san,
             "pv_san": pv_san,
@@ -796,14 +929,14 @@ def evaluate():
         _eval_cache[key] = result
         return jsonify(result)
     except Exception as exc:
-        _reset_engine()
         print(f"WARNING: /api/eval failed for {fen!r}: {exc}", flush=True)
         return jsonify({"error": f"engine failed: {exc}"}), 500
 
 
 @app.post("/api/practice-move")
+@limiter.limit("engine")
 def practice_move():
-    """Return one Stockfish move at a reduced Elo for repertoire practice."""
+    """Return a practice reply: human-like (Lichess) or reduced-Elo Stockfish."""
     _user, err = _require_pro()
     if err:
         return err
@@ -818,7 +951,7 @@ def practice_move():
     if board.is_game_over():
         return jsonify({"error": "game over"}), 400
 
-    # Prefer Elo (200-point steps). Legacy `level` 1..10 maps to ~1400..3200.
+    level = 5
     elo = data.get("elo")
     if elo is None and data.get("level") is not None:
         try:
@@ -830,35 +963,51 @@ def practice_move():
         elo = int(elo if elo is not None else 1800)
     except (TypeError, ValueError):
         elo = 1800
-    # Stockfish UCI_Elo is typically ~1320–3190
     elo = max(1320, min(3190, elo))
-    # Stronger opponents get a bit more search time/depth
-    depth = 6 + (elo - 1320) // 200  # ~6..15
-    think_time = 0.25 + (elo - 1320) / 2000.0  # ~0.25..1.2s
+    style = (data.get("style") or "human").strip().lower()
 
-    with _engine_lock:
-        engine = _get_engine()
-        if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
-        try:
-            engine.configure({
-                "UCI_LimitStrength": True,
-                "UCI_Elo": elo,
+    # Prefer human replies from Lichess explorer (gap 33 / 44).
+    if style in ("human", "lichess", "auto"):
+        from repertoire import human_moves as hm
+
+        picked = hm.pick_human_move(board, elo=elo)
+        if picked:
+            return jsonify({
+                "from": picked["from"],
+                "to": picked["to"],
+                "promotion": picked["promotion"],
+                "san": picked["san"],
+                "fen": picked["fen"],
+                "level": level,
+                "elo": elo,
+                "source": picked["source"],
+                "games": picked.get("games"),
             })
-            result = engine.play(
-                board, chess.engine.Limit(depth=depth, time=think_time)
-            )
-        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
-            _reset_engine()
-            return jsonify({"error": f"engine failed: {exc}"}), 500
-        finally:
+        if style != "auto":
+            # Fall through to Stockfish if explorer empty
+            pass
+
+    depth = 6 + (elo - 1320) // 200
+    think_time = 0.25 + (elo - 1320) / 2000.0
+
+    try:
+        with _engine_pool.acquire(timeout=15) as engine:
             try:
                 engine.configure({
-                    "UCI_LimitStrength": False,
-                    "Skill Level": 20,
+                    "UCI_LimitStrength": True,
+                    "UCI_Elo": elo,
                 })
-            except Exception:
-                pass
+                result = engine.play(
+                    board, chess.engine.Limit(depth=depth, time=think_time)
+                )
+            finally:
+                _engine_pool.configure_full_strength(engine)
+    except TimeoutError:
+        return _engine_busy_response()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+        return jsonify({"error": f"engine failed: {exc}"}), 500
 
     move = result.move
     if move is None:
@@ -875,7 +1024,8 @@ def practice_move():
         "san": san,
         "fen": board.fen(),
         "level": level,
-        "skill": skill,
+        "elo": elo,
+        "source": "stockfish",
     })
 
 
@@ -893,7 +1043,87 @@ def opening_lookup():
     return jsonify(result)
 
 
+def _parse_scan_blunders_request(data: dict) -> tuple[list, int]:
+    """Validate scan-blunders body → (games_in, opening_plies). Raises ValueError."""
+    games_in = data.get("games")
+    if not isinstance(games_in, list) or not games_in:
+        raise ValueError("games array is required")
+
+    opening_plies = data.get("opening_plies") or classify.OPENING_PLIES
+    try:
+        opening_plies = max(4, min(30, int(opening_plies)))
+    except (TypeError, ValueError):
+        opening_plies = classify.OPENING_PLIES
+
+    # Cap batch size — each game can take a few second-depth analyses.
+    return games_in[:40], opening_plies
+
+
+def _run_scan_blunders(games_in: list, opening_plies: int) -> dict:
+    """Run Stockfish opening scan. Raises RuntimeError if engine missing/busy."""
+    try:
+        with _engine_pool.acquire(timeout=30) as engine:
+            out_games = []
+            for i, g in enumerate(games_in):
+                if not isinstance(g, dict):
+                    continue
+                san = g.get("san") or []
+                if not isinstance(san, list) or not san:
+                    continue
+                color = (g.get("color") or "white").lower()
+                if color not in ("white", "black"):
+                    color = "white"
+                variation = g.get("variation") or "Unknown"
+                cache_key = "|".join([
+                    color,
+                    str(opening_plies),
+                    variation,
+                    " ".join(san[:opening_plies]),
+                ])
+                if cache_key in _scan_cache:
+                    cached = dict(_scan_cache[cache_key])
+                    cached["index"] = i
+                    out_games.append(cached)
+                    continue
+
+                flags = classify.classify_game(
+                    engine,
+                    [str(m) for m in san],
+                    color,
+                    opening_plies=opening_plies,
+                    eval_cache=_scan_eval_cache,
+                )
+                summary = classify.summarize_flags(flags)
+                entry = {
+                    "index": i,
+                    "variation": variation,
+                    "opponent": g.get("opponent"),
+                    "date": g.get("date"),
+                    "url": g.get("url"),
+                    "color": color,
+                    "flags": [asdict(f) for f in flags],
+                    **summary,
+                }
+                _scan_cache[cache_key] = {
+                    k: v for k, v in entry.items() if k != "index"
+                }
+                out_games.append(entry)
+    except TimeoutError as exc:
+        raise RuntimeError("engine_busy") from exc
+    except RuntimeError:
+        raise
+
+    patterns = classify.find_patterns(out_games, min_count=2)
+    return {
+        "opening_plies": opening_plies,
+        "scanned": len(out_games),
+        "games": out_games,
+        "patterns": patterns,
+    }
+
+
 @app.post("/api/scan-blunders")
+@limiter.limit("engine")
 def scan_blunders():
     """Scan opening moves of games for inaccuracies / mistakes / blunders.
 
@@ -903,90 +1133,70 @@ def scan_blunders():
       player_only?: bool (default true — only flag the player whose color is set)
     }
     Caps the batch to keep Render-friendly response times.
-    Free on Analyze; My Repertoire UI is Pro-gated separately.
+    Prefer POST /api/scan-blunders/jobs when behind Netlify (~26s proxy limit).
+    Requires Pro when billing is configured.
     """
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
-    games_in = data.get("games")
-    if not isinstance(games_in, list) or not games_in:
-        return jsonify({"error": "games array is required"}), 400
-
-    opening_plies = data.get("opening_plies") or classify.OPENING_PLIES
     try:
-        opening_plies = max(4, min(30, int(opening_plies)))
-    except (TypeError, ValueError):
-        opening_plies = classify.OPENING_PLIES
+        games_in, opening_plies = _parse_scan_blunders_request(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    try:
+        return jsonify(_run_scan_blunders(games_in, opening_plies))
+    except RuntimeError as e:
+        if str(e) == "engine_busy":
+            return _engine_busy_response()
+        return jsonify({"error": str(e)}), 503
 
-    # Cap batch size — each game can take a few second-depth analyses.
-    MAX_BATCH = 40
-    games_in = games_in[:MAX_BATCH]
 
-    with _engine_lock:
-        engine = _get_engine()
-        if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
+@app.post("/api/scan-blunders/jobs")
+@limiter.limit("engine")
+def start_scan_blunders_job():
+    """Start an async opening-blunder scan (avoids Netlify ~26s proxy timeout)."""
+    user, err = _require_pro()
+    if err:
+        return err
+    data = _json_body()
+    try:
+        games_in, opening_plies = _parse_scan_blunders_request(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
-        out_games = []
-        for i, g in enumerate(games_in):
-            if not isinstance(g, dict):
-                continue
-            san = g.get("san") or []
-            if not isinstance(san, list) or not san:
-                continue
-            color = (g.get("color") or "white").lower()
-            if color not in ("white", "black"):
-                color = "white"
-            variation = g.get("variation") or "Unknown"
-            cache_key = "|".join([
-                color,
-                str(opening_plies),
-                variation,
-                " ".join(san[:opening_plies]),
-            ])
-            if cache_key in _scan_cache:
-                cached = dict(_scan_cache[cache_key])
-                cached["index"] = i
-                out_games.append(cached)
-                continue
+    job_id = _job_store.enqueue(
+        lambda: _run_scan_blunders(list(games_in), opening_plies),
+        kind="scan_blunders",
+        user_id=user["id"] if user else None,
+    )
+    return jsonify({"job_id": job_id, "status": "pending"})
 
-            flags = classify.classify_game(
-                engine,
-                [str(m) for m in san],
-                color,
-                opening_plies=opening_plies,
-                eval_cache=_scan_eval_cache,
-            )
-            summary = classify.summarize_flags(flags)
-            entry = {
-                "index": i,
-                "variation": variation,
-                "opponent": g.get("opponent"),
-                "date": g.get("date"),
-                "url": g.get("url"),
-                "color": color,
-                "flags": [asdict(f) for f in flags],
-                **summary,
-            }
-            _scan_cache[cache_key] = {
-                k: v for k, v in entry.items() if k != "index"
-            }
-            out_games.append(entry)
 
-    patterns = classify.find_patterns(out_games, min_count=2)
-    return jsonify({
-        "opening_plies": opening_plies,
-        "scanned": len(out_games),
-        "games": out_games,
-        "patterns": patterns,
-    })
+@app.get("/api/scan-blunders/jobs/<job_id>")
+def poll_scan_blunders_job(job_id: str):
+    job = _job_store.get(job_id)
+    if not job:
+        return jsonify({"error": "job not found or expired"}), 404
+    status = job["status"]
+    if status == "done":
+        return jsonify({"status": "done", "result": job["result"]})
+    if status == "error":
+        return jsonify({"status": "error", "error": job.get("error", "unknown")})
+    return jsonify({"status": status})
 
 
 @app.post("/api/annotate-game")
+@limiter.limit("engine")
 def annotate_game():
     """Full-game Stockfish review with chess.com-style move badges.
 
     Body: { san: ["e4", "c5", ...], depth?: int }
-    Free for everyone — Pro gates My Repertoire instead.
+    Requires Pro when billing is configured.
     """
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     san = data.get("san") or []
     if not isinstance(san, list) or not san:
@@ -1007,11 +1217,8 @@ def annotate_game():
             "annotations": _annotate_cache[cache_key],
         })
 
-    with _engine_lock:
-        engine = _get_engine()
-        if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
-        try:
+    try:
+        with _engine_pool.acquire(timeout=30) as engine:
             flags = classify.annotate_game(
                 engine,
                 san,
@@ -1019,9 +1226,12 @@ def annotate_game():
                 max_plies=classify.ANNOTATE_MAX_PLIES,
                 eval_cache=_annotate_eval_cache,
             )
-        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
-            _reset_engine()
-            return jsonify({"error": f"engine failed: {exc}"}), 500
+    except TimeoutError:
+        return _engine_busy_response()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+        return jsonify({"error": f"engine failed: {exc}"}), 500
 
     annotations = [asdict(f) for f in flags]
     _annotate_cache[cache_key] = annotations
@@ -1033,12 +1243,16 @@ def annotate_game():
 
 
 @app.post("/api/annotate-ply")
+@limiter.limit("engine")
 def annotate_ply():
     """Classify a single exploratory move (position before + SAN).
 
     Body: { fen: "...", san: "h4", ply?: int, depth?: int }
-    Free for everyone — Pro gates My Repertoire instead.
+    Requires Pro when billing is configured.
     """
+    _user, err = _require_pro()
+    if err:
+        return err
     data = _json_body()
     fen = (data.get("fen") or "").strip()
     san = (data.get("san") or "").strip()
@@ -1061,11 +1275,8 @@ def annotate_ply():
     except (TypeError, ValueError):
         depth = classify.ANNOTATE_DEPTH
 
-    with _engine_lock:
-        engine = _get_engine()
-        if engine is None:
-            return jsonify({"error": "Stockfish engine not found"}), 503
-        try:
+    try:
+        with _engine_pool.acquire(timeout=15) as engine:
             ann = classify.annotate_ply(
                 engine,
                 board,
@@ -1075,9 +1286,12 @@ def annotate_ply():
                 eval_cache=_annotate_eval_cache,
                 mark_quiet_best=True,
             )
-        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
-            _reset_engine()
-            return jsonify({"error": f"engine failed: {exc}"}), 500
+    except TimeoutError:
+        return _engine_busy_response()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as exc:
+        return jsonify({"error": f"engine failed: {exc}"}), 500
 
     return jsonify({
         "depth": depth,
@@ -1485,42 +1699,9 @@ def _build_report(games_with_moves, username_label: str, months: int,
 
 # ---- async report jobs (Netlify proxy times out ~26s; chess.com fetch can take longer) ----
 
-_report_jobs: dict[str, dict] = {}
-_report_jobs_lock = threading.Lock()
-_REPORT_JOB_TTL = 3600
 
-
-def _prune_report_jobs() -> None:
-    cutoff = time.time() - _REPORT_JOB_TTL
-    with _report_jobs_lock:
-        for jid in [k for k, j in _report_jobs.items() if j.get("created", 0) < cutoff]:
-            del _report_jobs[jid]
-
-
-def _start_report_job(worker) -> str:
-    _prune_report_jobs()
-    job_id = secrets.token_urlsafe(16)
-    with _report_jobs_lock:
-        _report_jobs[job_id] = {"status": "pending", "created": time.time()}
-
-    def run() -> None:
-        try:
-            with _report_jobs_lock:
-                if job_id in _report_jobs:
-                    _report_jobs[job_id]["status"] = "running"
-            result = worker()
-            with _report_jobs_lock:
-                if job_id in _report_jobs:
-                    _report_jobs[job_id]["status"] = "done"
-                    _report_jobs[job_id]["result"] = result
-        except Exception as e:
-            with _report_jobs_lock:
-                if job_id in _report_jobs:
-                    _report_jobs[job_id]["status"] = "error"
-                    _report_jobs[job_id]["error"] = str(e)
-
-    threading.Thread(target=run, daemon=True).start()
-    return job_id
+def _start_report_job(worker, *, kind: str = "report", user_id: int | None = None) -> str:
+    return _job_store.enqueue(worker, kind=kind, user_id=user_id)
 
 
 def _fetch_games_for_report(username: str, source: str, months: int):
@@ -1573,6 +1754,7 @@ def _make_me_report(user, months: int, time_classes, since_ts, until_ts):
 
 
 @app.route("/api/report/jobs", methods=["GET", "POST"])
+@limiter.limit("report")
 def start_report_job():
     username = (request.args.get("username") or "").strip()
     if not username:
@@ -1593,12 +1775,15 @@ def start_report_job():
     job_id = _start_report_job(
         lambda: _make_username_report(
             username, source, months, time_classes, since_ts, until_ts
-        )
+        ),
+        kind="report",
+        user_id=uid,
     )
     return jsonify({"job_id": job_id, "status": "pending"})
 
 
 @app.route("/api/report/me/jobs", methods=["GET", "POST"])
+@limiter.limit("report")
 def start_report_me_job():
     user = _current_user()
     if user is None:
@@ -1621,15 +1806,16 @@ def start_report_me_job():
     _log_search(label, source="linked", kind="me", user_id=user["id"])
 
     job_id = _start_report_job(
-        lambda: _make_me_report(user, months, time_classes, since_ts, until_ts)
+        lambda: _make_me_report(user, months, time_classes, since_ts, until_ts),
+        kind="report_me",
+        user_id=user["id"],
     )
     return jsonify({"job_id": job_id, "status": "pending"})
 
 
 @app.get("/api/report/jobs/<job_id>")
 def poll_report_job(job_id: str):
-    with _report_jobs_lock:
-        job = _report_jobs.get(job_id)
+    job = _job_store.get(job_id)
     if not job:
         return jsonify({"error": "job not found or expired"}), 404
     status = job["status"]
@@ -1641,6 +1827,7 @@ def poll_report_job(job_id: str):
 
 
 @app.get("/api/report")
+@limiter.limit("report")
 def report():
     username = (request.args.get("username") or "").strip()
     if not username:
@@ -1677,6 +1864,7 @@ def report():
 
 
 @app.get("/api/report/me")
+@limiter.limit("report")
 def report_me():
     user = _current_user()
     if user is None:
@@ -1741,6 +1929,30 @@ def _json_body() -> dict:
 def _login_user(user: sqlite3.Row) -> dict:
     session.permanent = True
     session["user_id"] = user["id"]
+    # Track server-side session for revoke UI (gap 48)
+    sid = secrets.token_urlsafe(24)
+    session["sid"] = sid
+    now = time.time()
+    ua = (request.headers.get("User-Agent") or "")[:200]
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    ip = forwarded or (request.remote_addr or "")
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO auth_sessions "
+                "(id, user_id, created_at, last_seen, user_agent, ip, revoked) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0)",
+                (sid, user["id"], now, now, ua, ip[:64]),
+            )
+    except Exception as exc:
+        print(f"WARNING: auth_sessions insert failed: {exc}", flush=True)
+    if hasattr(sys.modules[__name__], "_ensure_csrf"):
+        try:
+            _ensure_csrf()  # type: ignore[name-defined]
+        except Exception:
+            session.setdefault("csrf_token", secrets.token_urlsafe(32))
+    else:
+        session.setdefault("csrf_token", secrets.token_urlsafe(32))
     return _user_payload(user)
 
 
@@ -1750,11 +1962,15 @@ _GOOGLE_TOKEN_MAX_AGE_SEC = 5 * 60
 
 @app.get("/api/auth/config")
 def auth_config():
-    """Return GIS client ID, GA4 id, and a one-time nonce bound to this session."""
+    """Return GIS client ID, analytics config, CSRF token, and a one-time nonce."""
     payload = {
         "google_client_id": GOOGLE_CLIENT_ID or None,
         "ga_measurement_id": GA_MEASUREMENT_ID or None,
+        "posthog_project_api_key": POSTHOG_PROJECT_API_KEY or None,
+        "posthog_host": POSTHOG_HOST if POSTHOG_PROJECT_API_KEY else None,
         "nonce": None,
+        "csrf_token": session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+        "session_days": int(app.config["PERMANENT_SESSION_LIFETIME"].total_seconds() // 86400),
     }
     if GOOGLE_CLIENT_ID:
         nonce = secrets.token_urlsafe(32)
@@ -1765,6 +1981,7 @@ def auth_config():
 
 
 @app.post("/api/auth/google")
+@limiter.limit("auth")
 def auth_google():
     if not GOOGLE_CLIENT_ID:
         return jsonify({"error": "Google sign-in is not configured on this server."}), 503
@@ -1897,6 +2114,7 @@ def auth_google():
     return jsonify(payload)
 
 @app.post("/api/register")
+@limiter.limit("auth")
 def register():
     data = _json_body()
     email = (data.get("email") or "").strip().lower()
@@ -1926,6 +2144,7 @@ def register():
 
 
 @app.post("/api/login")
+@limiter.limit("auth")
 def login():
     data = _json_body()
     email = (data.get("email") or "").strip().lower()
@@ -2118,6 +2337,66 @@ def analytics_summary():
     })
 
 
+def _users_csv_bytes() -> bytes:
+    """Build a UTF-8 CSV of all signup accounts (no password hashes)."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, email, display_name, created_at, "
+            "google_sub, password_hash, plan, plan_status "
+            "FROM users ORDER BY id"
+        ).fetchall()
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id",
+        "email",
+        "display_name",
+        "created_at_utc",
+        "auth_provider",
+        "has_password",
+        "plan",
+        "plan_status",
+    ])
+    for r in rows:
+        created = int(r["created_at"] or 0)
+        created_iso = (
+            datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if created
+            else ""
+        )
+        writer.writerow([
+            int(r["id"]),
+            r["email"] or "",
+            (r["display_name"] or "").strip(),
+            created_iso,
+            "google" if (r["google_sub"] or "").strip() else "password",
+            "1" if (r["password_hash"] or "").strip() else "0",
+            (r["plan"] or "free"),
+            r["plan_status"] or "",
+        ])
+    # BOM so Excel opens UTF-8 emails correctly
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+@app.get("/api/analytics/users.csv")
+def analytics_users_csv():
+    """Download all signup emails as CSV. Admin only (ANALYTICS_ADMIN_EMAIL)."""
+    user, err = _require_login()
+    if err:
+        return err
+    if not _can_view_analytics(user):
+        return jsonify({"error": "Forbidden", "code": "analytics_forbidden"}), 403
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return Response(
+        _users_csv_bytes(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="users-{stamp}.csv"',
+        },
+    )
+
+
 @app.post("/api/admin/users/<int:user_id>/password")
 def admin_set_password(user_id: int):
     """Admin-only: set a temporary password so the user can sign in / change it."""
@@ -2280,6 +2559,11 @@ def change_password():
             (generate_password_hash(new), user["id"]),
         )
     return jsonify({"ok": True})
+
+
+from webapp.learning_api import register_learning_routes  # noqa: E402
+
+register_learning_routes(app)
 
 
 if __name__ == "__main__":

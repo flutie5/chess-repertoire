@@ -8,6 +8,7 @@ User-Agent and make requests serially, which we honor here.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -72,6 +73,7 @@ def fetch_games(
     user_agent: str = DEFAULT_UA,
     cache_dir: Path | None = None,
     verbose: bool = True,
+    current_month_cache_seconds: int | None = None,
 ) -> list[dict]:
     """Fetch games from the most recent `months` monthly archives.
 
@@ -79,8 +81,17 @@ def fetch_games(
     "time_class", "white", "black", "rules", etc.).
 
     Completed months are cached to disk so repeat runs only re-fetch the
-    current (still-changing) month.
+    current (still-changing) month. The current month may reuse a short-TTL
+    disk cache (CURRENT_MONTH_CACHE_SECONDS, default 900) to cut serial
+    chess.com load under repeated analyzes.
     """
+    if current_month_cache_seconds is None:
+        raw = os.environ.get("CURRENT_MONTH_CACHE_SECONDS", "900").strip()
+        try:
+            current_month_cache_seconds = max(0, int(raw))
+        except ValueError:
+            current_month_cache_seconds = 900
+
     archives = list_archives(username, user_agent)
     if not archives:
         raise ChessComError(f"No archives found for user '{username}'.")
@@ -97,9 +108,13 @@ def fetch_games(
             # .../games/2026/07 -> 2026-07.json
             year, month = url.rstrip("/").split("/")[-2:]
             cache_file = cache_dir / f"{username.lower()}-{year}-{month}.json"
-            # Never trust cache for the in-progress month.
-            if cache_file.exists() and url != current_month_url:
-                cached = json.loads(cache_file.read_text())
+            if cache_file.exists():
+                if url != current_month_url:
+                    cached = json.loads(cache_file.read_text())
+                elif current_month_cache_seconds > 0:
+                    age = time.time() - cache_file.stat().st_mtime
+                    if age <= current_month_cache_seconds:
+                        cached = json.loads(cache_file.read_text())
 
         if cached is not None:
             month_games = cached
