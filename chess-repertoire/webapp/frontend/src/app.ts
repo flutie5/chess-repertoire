@@ -2,6 +2,12 @@
 /** Legacy SPA logic extracted from the monolith index.html. */
 import { Chess } from "@vendor/chess.js";
 import { state, START_FEN } from "./state";
+import {
+  initProductAnalytics,
+  identifyProductUser,
+  resetProductAnalytics,
+  trackProductEvent,
+} from "./analytics/posthog";
 
 /* ---------- game model (chess.js) ---------- */
 
@@ -2578,6 +2584,12 @@ function applyReport(data) {
   setColor(state.color);
   repSlipupsScanKey = ""; // force rescan with new games
   if (state.repertoireOpen) scheduleRepSlipupsRefresh();
+  trackProductEvent("report_analyzed", {
+    username: data.username || undefined,
+    analyzed_games: data.analyzed_games ?? undefined,
+    months: data.months ?? undefined,
+    kind: lastAnalyze === analyzeMe ? "me" : "search",
+  });
 }
 
 async function runReportSync(syncPath, fetchingMsg) {
@@ -2910,10 +2922,12 @@ function setUser(user) {
     userMenuBtn.textContent = user.display_name || user.email;
     fillProfileForm(user);
     loadRepertoireFromServer();
+    identifyProductUser(user);
   } else {
     userMenu.classList.remove("open");
     closeProfile();
     loadRepertoireFromLocal();
+    resetProductAnalytics();
   }
   syncProChips();
   if (!state.report) renderSidebar();
@@ -3194,6 +3208,7 @@ async function startCheckout(interval) {
   }
   setMsg(upgradeMsg, "Redirecting to checkout\u2026");
   try {
+    trackProductEvent("checkout_started", { interval });
     const data = await api("/api/billing/checkout", "POST", { interval });
     if (data.url) {
       window.location.href = data.url;
@@ -3282,6 +3297,9 @@ async function submitAuth(path) {
 
 function finishLogin(user, isNewAccount) {
   setUser(user);
+  trackProductEvent(isNewAccount ? "user_signed_up" : "user_logged_in", {
+    auth_provider: user?.auth_provider || "password",
+  });
   closeAuthModal();
   document.getElementById("auth-password").value = "";
   setMsg(authMsg, "");
@@ -3597,6 +3615,10 @@ document.addEventListener("keydown", e => {
   // After session restore so admin logins are not counted as visits.
   trackVisit();
   initGoogleAnalytics();
+  try {
+    const cfg = await fetchSiteConfig();
+    initProductAnalytics(cfg, () => currentUser);
+  } catch (e) { /* best-effort */ }
 })();
 
 /* ---------- Google Analytics (GA4, optional) ----------
@@ -3756,6 +3778,39 @@ async function adminSetUserPassword(btn) {
     setMsg(msg, e.message || "Could not set password", "error");
   }
 }
+
+async function exportUsersCsv() {
+  const msg = document.getElementById("analytics-msg");
+  setMsg(msg, "Downloading users…");
+  try {
+    await ensureApiBase();
+    const headers = {};
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    const resp = await fetchApi("/api/analytics/users.csv", { headers });
+    if (!resp.ok) {
+      const data = await readJson(resp).catch(() => ({}));
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get("Content-Disposition") || "";
+    const match = /filename="?([^"]+)"?/i.exec(cd);
+    const filename = match?.[1] || "users.csv";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg(msg, `Downloaded ${filename}.`, "ok");
+  } catch (e) {
+    setMsg(msg, e.message || "Could not download users CSV", "error");
+  }
+}
+
+document.getElementById("analytics-export-users-btn")?.addEventListener(
+  "click",
+  () => exportUsersCsv()
+);
 
 function escapeHtml(s) {
   return String(s)

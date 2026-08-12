@@ -29,12 +29,14 @@ Light /api/eval requires login.
 
 Analytics / admin (free, self-hosted): POST /api/analytics/hit,
 GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
+GET /api/analytics/users.csv (download signup emails; admin only),
 POST /api/admin/users/<id>/password (admin set temporary password).
 """
 
 from __future__ import annotations
 
 import atexit
+import csv
 import hashlib
 import os
 import re
@@ -45,11 +47,12 @@ import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 
 import chess
 import chess.engine
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, Response, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -447,6 +450,16 @@ GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "").strip()
 if not GA_MEASUREMENT_ID and IS_PRODUCTION:
     GA_MEASUREMENT_ID = _DEFAULT_PRODUCTION_GA_MEASUREMENT_ID
 
+# PostHog product analytics (industry-standard dashboards: People, Insights,
+# Retention, Session Replay). Project API key is public by design (same class
+# as a GA4 measurement ID). Create a project at https://us.posthog.com (or EU)
+# → Project settings → Project API Key. Off unless POSTHOG_PROJECT_API_KEY is set.
+POSTHOG_PROJECT_API_KEY = os.environ.get("POSTHOG_PROJECT_API_KEY", "").strip()
+POSTHOG_HOST = (
+    os.environ.get("POSTHOG_HOST", "").strip()
+    or "https://us.i.posthog.com"
+)
+
 
 def _user_account_count() -> int:
     with _db() as conn:
@@ -626,6 +639,7 @@ def _user_payload(user: sqlite3.Row) -> dict:
     plan_expires_at = _user_col(user, "plan_expires_at")
     is_pro = _is_pro(user) or not _billing_configured()
     return {
+        "id": int(user["id"]),
         "email": user["email"],
         "display_name": display or "",
         "chesscom_username": user["chesscom_username"],
@@ -641,6 +655,7 @@ def _user_payload(user: sqlite3.Row) -> dict:
         "billing_enabled": _billing_configured(),
         "trial_days": TRIAL_DAYS,
         "can_view_analytics": _can_view_analytics(user),
+        "created_at": int(user["created_at"] or 0) if "created_at" in keys else 0,
     }
 
 # Bounded in-process caches (shared only within this worker process).
@@ -1947,10 +1962,12 @@ _GOOGLE_TOKEN_MAX_AGE_SEC = 5 * 60
 
 @app.get("/api/auth/config")
 def auth_config():
-    """Return GIS client ID, GA4 id, CSRF token, and a one-time nonce."""
+    """Return GIS client ID, analytics config, CSRF token, and a one-time nonce."""
     payload = {
         "google_client_id": GOOGLE_CLIENT_ID or None,
         "ga_measurement_id": GA_MEASUREMENT_ID or None,
+        "posthog_project_api_key": POSTHOG_PROJECT_API_KEY or None,
+        "posthog_host": POSTHOG_HOST if POSTHOG_PROJECT_API_KEY else None,
         "nonce": None,
         "csrf_token": session.setdefault("csrf_token", secrets.token_urlsafe(32)),
         "session_days": int(app.config["PERMANENT_SESSION_LIFETIME"].total_seconds() // 86400),
@@ -2318,6 +2335,66 @@ def analytics_summary():
             ],
         },
     })
+
+
+def _users_csv_bytes() -> bytes:
+    """Build a UTF-8 CSV of all signup accounts (no password hashes)."""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id, email, display_name, created_at, "
+            "google_sub, password_hash, plan, plan_status "
+            "FROM users ORDER BY id"
+        ).fetchall()
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id",
+        "email",
+        "display_name",
+        "created_at_utc",
+        "auth_provider",
+        "has_password",
+        "plan",
+        "plan_status",
+    ])
+    for r in rows:
+        created = int(r["created_at"] or 0)
+        created_iso = (
+            datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if created
+            else ""
+        )
+        writer.writerow([
+            int(r["id"]),
+            r["email"] or "",
+            (r["display_name"] or "").strip(),
+            created_iso,
+            "google" if (r["google_sub"] or "").strip() else "password",
+            "1" if (r["password_hash"] or "").strip() else "0",
+            (r["plan"] or "free"),
+            r["plan_status"] or "",
+        ])
+    # BOM so Excel opens UTF-8 emails correctly
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+@app.get("/api/analytics/users.csv")
+def analytics_users_csv():
+    """Download all signup emails as CSV. Admin only (ANALYTICS_ADMIN_EMAIL)."""
+    user, err = _require_login()
+    if err:
+        return err
+    if not _can_view_analytics(user):
+        return jsonify({"error": "Forbidden", "code": "analytics_forbidden"}), 403
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return Response(
+        _users_csv_bytes(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="users-{stamp}.csv"',
+        },
+    )
 
 
 @app.post("/api/admin/users/<int:user_id>/password")

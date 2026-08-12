@@ -13,5 +13,8 @@
     "typescript": "^5.8.2",
     "vite": "^6.2.0",
     "vite-plugin-pwa": "^0.21.1"
+  },
+  "dependencies": {
+    "posthog-js": "^1.416.0"
   }
 }

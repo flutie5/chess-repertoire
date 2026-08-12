@@ -141,8 +141,12 @@
   </div>
 
   <div class="profile-card" id="profile-analytics-card" hidden>
-    <h2>Admin</h2>
-    <p class="hint">Visible only to <code>ANALYTICS_ADMIN_EMAIL</code>. Accounts and visits from production.</p>
+    <h2>Ops tools</h2>
+    <p class="hint">
+      Product analytics live in <strong>PostHog</strong> (People, Insights, Retention, Replay).
+      Traffic/audience lives in <strong>Google Analytics (GA4)</strong>.
+      This panel is for account ops only — not a substitute for those dashboards.
+    </p>
     <div class="analytics-stats" id="profile-analytics-stats">
       <div><span class="analytics-num" id="analytics-account-total">—</span><span class="analytics-label">accounts</span></div>
       <div><span class="analytics-num" id="analytics-today-sessions">—</span><span class="analytics-label">sessions today</span></div>
@@ -151,7 +155,10 @@
       <div><span class="analytics-num" id="analytics-all-views">—</span><span class="analytics-label">views all-time</span></div>
     </div>
     <h3 style="margin:16px 0 6px;font-size:14px">Accounts</h3>
-    <p class="hint" style="margin:0 0 8px">Emails of everyone who signed up. Set a temporary password for email/password resets (tell them out of band).</p>
+    <p class="hint" style="margin:0 0 8px">Signup roster for password resets. Prefer PostHog → People for who is using the product.</p>
+    <p style="margin:0 0 8px">
+      <button type="button" class="ghost" id="analytics-export-users-btn" title="Download CSV of all signed-up emails">Download users CSV</button>
+    </p>
     <div id="analytics-users-list" class="analytics-search-list"></div>
     <h3 style="margin:16px 0 6px;font-size:14px">Search bar analyzes</h3>
     <p class="hint" style="margin:0 0 8px">Every Analyze lookup (username or Analyze my games). Latest 200.</p>
