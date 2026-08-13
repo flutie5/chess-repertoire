@@ -181,7 +181,7 @@ No Render domain changes are required — only Netlify serves the public site; A
 - [ ] Register / login works (session cookie on Netlify domain)
 - [ ] Continue with Google works (origins + `GOOGLE_CLIENT_ID` configured)
 - [ ] Analyze a username — report loads (chess.com fetch + cache)
-- [ ] Sign in, then board eval bar works (`/api/eval` requires login)
+- [ ] Board eval bar works without signing in (`/api/eval` is free, rate-limited)
 - [ ] Deep review (annotate / scan) requires Pro when Stripe is configured
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
 - [ ] In-flight report jobs survive a brief restart (rows in `async_jobs`)

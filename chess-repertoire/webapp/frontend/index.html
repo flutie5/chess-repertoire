@@ -299,12 +299,21 @@
         <p>Focus the board, then use arrow keys to move the square highlight, Enter/Space to select. Left/Right also step plies. Esc clears selection.</p>
       </details>
     </div>
-    <div id="engine-panel">
+    <div id="engine-panel" class="visible">
       <div id="engine-head">
         <span id="engine-score">0.0</span>
         <span id="engine-label">Stockfish</span>
       </div>
       <div id="engine-pv"></div>
+      <div id="position-load">
+        <label class="sr-only" for="position-input">Position (FEN or PGN)</label>
+        <textarea id="position-input" rows="2" spellcheck="false" autocomplete="off"
+          placeholder="Paste FEN or PGN for a specific position"></textarea>
+        <div class="position-load-row">
+          <button type="button" id="position-load-btn">Load</button>
+          <span id="position-load-msg"></span>
+        </div>
+      </div>
     </div>
     <div id="line-moves"><span class="placeholder">Pick an opening line on the right to replay it here.</span></div>
   </section>

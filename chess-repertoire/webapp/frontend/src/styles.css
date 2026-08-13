@@ -815,6 +815,31 @@
   #engine-label { color: var(--text-muted); font-size: 12px; }
   #engine-pv { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
   #engine-pv b { color: var(--green); }
+  #position-load {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-top: 6px; padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  #position-input {
+    width: 100%; box-sizing: border-box;
+    resize: vertical; min-height: 44px; max-height: 140px;
+    background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    padding: 8px 10px; font-size: 12px; line-height: 1.4;
+    font-family: var(--font-mono); outline: none;
+  }
+  #position-input:focus { border-color: var(--green); }
+  .position-load-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  #position-load-btn {
+    background: var(--green); color: #fff; border: none;
+    border-radius: var(--radius-sm); padding: 6px 12px;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  #position-load-btn:hover { background: var(--green-hover); }
+  #position-load-msg { font-size: 12px; color: var(--text-muted); }
+  #position-load-msg.err { color: #e57373; }
 
   #line-moves {
     width: calc(var(--board-px) + 30px); min-height: 48px;

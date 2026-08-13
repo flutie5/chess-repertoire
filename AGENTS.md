@@ -36,8 +36,8 @@ a Vite-built SPA from `chess-repertoire/webapp/static/` (source under
   `/api/annotate-game`, `/api/scan-blunders`). The binary is NOT committed; it lives
   at `chess-repertoire/engine/linux/stockfish` (gitignored). If it is missing, run
   `bash scripts/download_stockfish.sh` from `chess-repertoire/` (downloads ~76 MB
-  from GitHub). The core opening-report flow works without it. `/api/eval` requires
-  login; annotate/scan require Pro when Stripe is configured. Keep Gunicorn
+  from GitHub). The core opening-report flow works without it. `/api/eval` is
+  free (rate-limited); annotate/scan require Pro when Stripe is configured. Keep Gunicorn
   `--workers 1` while Stockfish runs in-process.
 - The report flow (`/api/report?username=...`) fetches real games from the public
   chess.com API over the network — no API key needed. Completed months are cached to

@@ -694,10 +694,11 @@ function scheduleEval() {
     labelEl.textContent = "Stockfish — place both kings to evaluate";
     pvEl.innerHTML = "";
     clearBestArrow();
-    evalFill.style.height = "50%";
+    if (evalFill) evalFill.style.height = "50%";
     return;
   }
   if (evalCache.has(fen)) { renderEval(evalCache.get(fen)); return; }
+  clearBestArrow();
   enginePanel.classList.add("visible");
   labelEl.textContent = "Stockfish \u2014 thinking\u2026";
   evalTimer = setTimeout(() => fetchEval(fen), 200);
@@ -726,6 +727,7 @@ async function fetchEval(fen) {
       engineAvailable = null;
       enginePanel.classList.add("visible");
       labelEl.textContent = "Stockfish — sign in to see evaluations";
+      clearBestArrow();
       // Soft prompt once — never re-open on every eval refresh.
       openAuthModal({ soft: true });
       return;
@@ -775,15 +777,11 @@ function renderEval(data) {
   scoreEl.className = (data.mate != null ? data.mate > 0 : (data.cp ?? 0) >= 0)
     ? "white-adv" : "black-adv";
   labelEl.textContent = `Stockfish \u2014 depth ${data.depth}`;
-  // White is the light fill; pin it to the bottom when White sits there, otherwise the top
-  if (state.orientation === "white") {
+  if (evalFill) {
     evalFill.style.bottom = "0";
     evalFill.style.top = "auto";
-  } else {
-    evalFill.style.top = "0";
-    evalFill.style.bottom = "auto";
+    evalFill.style.height = (whiteShare * 100).toFixed(1) + "%";
   }
-  evalFill.style.height = (whiteShare * 100).toFixed(1) + "%";
   pvEl.innerHTML = data.best_san
     ? `Best: <b>${data.best_san}</b> &nbsp; ${data.pv_san}`
     : "";
@@ -797,6 +795,136 @@ function renderEval(data) {
     clearBestArrow();
   }
 }
+
+/* ---------- load FEN / PGN ---------- */
+
+const positionInput = document.getElementById("position-input");
+const positionLoadBtn = document.getElementById("position-load-btn");
+const positionLoadMsg = document.getElementById("position-load-msg");
+
+function clearPositionInput() {
+  if (positionInput) positionInput.value = "";
+  setPositionLoadMsg("");
+}
+
+function setPositionLoadMsg(text, isError) {
+  if (!positionLoadMsg) return;
+  positionLoadMsg.textContent = text || "";
+  positionLoadMsg.classList.toggle("err", !!isError);
+}
+
+function stripPositionWrapper(text) {
+  let t = (text || "").trim().replace(/^["']+|["']+$/g, "");
+  t = t.replace(/^(fen|pgn)\s*[:=]\s*/i, "");
+  return t.trim();
+}
+
+function fenFromPastedUrl(text) {
+  try {
+    const u = new URL(text.trim());
+    const fen = u.searchParams.get("fen") || u.searchParams.get("FEN");
+    if (fen) return fen;
+    const pathFen = u.pathname.match(/\/analysis\/(?:(?:standard|chess960)\/)?([^/?#]+)/i);
+    if (pathFen?.[1]?.includes("/")) {
+      return decodeURIComponent(pathFen[1]).replace(/_/g, " ");
+    }
+  } catch (_) { /* not a URL */ }
+  return null;
+}
+
+function looksLikeFen(text) {
+  const first = (text || "").trim().split(/\s+/)[0] || "";
+  return /^[rnbqkpRNBQKP1-8]+(\/[rnbqkpRNBQKP1-8]+){7}$/.test(first);
+}
+
+function applyLoadedChess(c, { plyAtEnd = false } = {}) {
+  if (state.editMode) setEditMode(false);
+  freeFen = null;
+  const verbose = c.history({ verbose: true });
+  gameRootFen = verbose.length ? verbose[0].before : c.fen();
+  game = c;
+  rebuildDerived();
+  state.ply = plyAtEnd ? state.sans.length : 0;
+  state.moveFlags = [];
+  state.mainLineSans = [];
+  state.exploreAnns = {};
+  exploreAnnotateToken += 1;
+  state.lastOpeningName = null;
+  clearPremove();
+  clearUserShapes();
+  clearBoardPlayers();
+  setGameView(false);
+  clearGamesFilters();
+  refreshBoard();
+}
+
+function loadPositionFromText(raw, { quietFail = false } = {}) {
+  enginePanel.classList.add("visible");
+  const text = stripPositionWrapper(raw);
+  if (!text) {
+    if (!quietFail) setPositionLoadMsg("Paste a FEN or PGN first.", true);
+    return false;
+  }
+
+  const fromUrl = fenFromPastedUrl(text);
+  const fenCandidate = fromUrl || (looksLikeFen(text) ? text : null);
+  if (fenCandidate) {
+    const c = tryLoadChess(fenCandidate);
+    if (c) {
+      applyLoadedChess(c);
+      clearPositionInput();
+      setPositionLoadMsg("Position loaded.");
+      return true;
+    }
+    const parts = fenCandidate.trim().split(/\s+/);
+    if (parts[0]?.split("/").length === 8) {
+      setCustomFen(fenCandidate, { keepEdit: false });
+      clearPositionInput();
+      setPositionLoadMsg("Position loaded.");
+      return true;
+    }
+    if (!quietFail) setPositionLoadMsg("That FEN isn’t a legal position.", true);
+    return false;
+  }
+
+  try {
+    const c = new Chess();
+    c.loadPgn(text, { strict: false });
+    const moves = c.history();
+    const isStart = c.fen() === START_FEN;
+    if (!moves.length && isStart && !/\[FEN\b/i.test(text)) {
+      if (!quietFail) setPositionLoadMsg("Couldn’t read that as FEN or PGN.", true);
+      return false;
+    }
+    applyLoadedChess(c, { plyAtEnd: moves.length > 0 });
+    clearPositionInput();
+    setPositionLoadMsg(moves.length ? `Loaded ${moves.length} moves.` : "Position loaded.");
+    return true;
+  } catch (_) {
+    if (!quietFail) setPositionLoadMsg("Couldn’t read that as FEN or PGN.", true);
+    return false;
+  }
+}
+
+function onPositionLoad() {
+  loadPositionFromText(positionInput?.value);
+}
+
+positionLoadBtn?.addEventListener("click", onPositionLoad);
+positionInput?.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey || !e.shiftKey)) {
+    e.preventDefault();
+    onPositionLoad();
+  }
+});
+positionInput?.addEventListener("paste", () => {
+  requestAnimationFrame(() => {
+    const text = positionInput?.value || "";
+    if (looksLikeFen(text) || fenFromPastedUrl(text) || /\[Event\b/i.test(text) || /\d+\./.test(text)) {
+      loadPositionFromText(text, { quietFail: true });
+    }
+  });
+});
 
 /* ---------- best-move arrow ---------- */
 
@@ -903,10 +1031,24 @@ function sqToCenter(sq, orientation) {
 }
 
 function parseBestMove(fen, bestSan) {
+  if (!bestSan) return null;
   try {
     const c = new Chess(fen);
-    const m = c.move(bestSan);
-    return m ? { from: m.from, to: m.to } : null;
+    const raw = String(bestSan).trim();
+    try {
+      const m = c.move(raw);
+      if (m) return { from: m.from, to: m.to };
+    } catch (_) { /* try UCI below */ }
+    const uci = raw.replace(/[^a-h1-8qrbn]/gi, "");
+    if (/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(uci)) {
+      const m = c.move({
+        from: uci.slice(0, 2).toLowerCase(),
+        to: uci.slice(2, 4).toLowerCase(),
+        promotion: uci.length > 4 ? uci[4].toLowerCase() : undefined,
+      });
+      if (m) return { from: m.from, to: m.to };
+    }
+    return null;
   } catch (e) {
     return null;
   }
@@ -915,12 +1057,13 @@ function parseBestMove(fen, bestSan) {
 let bestArrowEl = null;
 
 function ensureBestArrowLayer() {
-  if (bestArrowEl && boardEl.contains(bestArrowEl)) return bestArrowEl;
+  const frame = document.querySelector(".board-frame") || boardEl;
+  if (bestArrowEl && frame.contains(bestArrowEl)) return bestArrowEl;
   bestArrowEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   bestArrowEl.id = "best-arrow";
   bestArrowEl.setAttribute("viewBox", "0 0 8 8");
   bestArrowEl.setAttribute("preserveAspectRatio", "none");
-  boardEl.appendChild(bestArrowEl);
+  frame.appendChild(bestArrowEl);
   return bestArrowEl;
 }
 

@@ -54,12 +54,11 @@ def _register(client, email="free@example.com", password="password123"):
     return resp.get_json()
 
 
-def test_eval_requires_login(client):
+def test_eval_allows_anonymous(client):
     fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     resp = client.get(f"/api/eval?fen={fen}")
-    assert resp.status_code == 401
-    body = resp.get_json()
-    assert body["code"] == "login_required"
+    # May 503 without Stockfish; must not require login or Pro.
+    assert resp.status_code not in (401, 402)
 
 
 def test_annotate_requires_pro_when_billing_configured(client):

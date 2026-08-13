@@ -25,7 +25,7 @@ chess.com-style move annotations (blunder/mistake/great/best/brilliant).
 Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
 /api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync,
 practice-move, and deep Stockfish review (annotate-*, scan-blunders*).
-Light /api/eval requires login.
+Light /api/eval is free (rate-limited). Deep review and practice require Pro when Stripe is configured.
 
 Analytics / admin (free, self-hosted): POST /api/analytics/hit,
 GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
@@ -873,9 +873,6 @@ def engine_status():
 @app.get("/api/eval")
 @limiter.limit("engine")
 def evaluate():
-    user, err = _require_login()
-    if err:
-        return err
     fen = (request.args.get("fen") or "").strip()
     if not fen:
         return jsonify({"error": "fen is required"}), 400
