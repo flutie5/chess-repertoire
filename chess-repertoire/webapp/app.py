@@ -2070,12 +2070,27 @@ def auth_google():
     try:
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token
-        info = id_token.verify_oauth2_token(
-            credential,
-            google_requests.Request(),
-            GOOGLE_CLIENT_ID,
-            clock_skew_in_seconds=60,
-        )
+        import concurrent.futures
+
+        def _verify():
+            return id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                GOOGLE_CLIENT_ID,
+                clock_skew_in_seconds=60,
+            )
+
+        # Bound Google JWKS/network so a hung cert fetch cannot wedge the worker.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(_verify)
+            try:
+                info = fut.result(timeout=12)
+            except concurrent.futures.TimeoutError:
+                print("WARNING: Google token verify timed out", flush=True)
+                return jsonify({
+                    "error": "Google verification timed out. Please try again.",
+                    "code": "google_verify_timeout",
+                }), 504
     except Exception as exc:
         print(f"WARNING: Google token verify failed: {exc}", flush=True)
         return jsonify({"error": "Invalid Google credential."}), 401

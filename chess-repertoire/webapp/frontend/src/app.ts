@@ -2750,6 +2750,22 @@ async function fetchApi(path, opts = {}) {
   return resp;
 }
 
+function isSessionApiPath(path) {
+  // These need the Netlify same-origin session cookie (nonce / CSRF / login).
+  // Never fall back to cross-origin Render for them.
+  return /^\/api\/(auth|logout|me|billing)\b/.test(path || "");
+}
+
+async function fetchWithTimeout(path, opts = {}, timeoutMs = 20000) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    return await fetchApi(path, ctrl ? { ...opts, signal: ctrl.signal } : opts);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function ensureApiBase() {
   if (apiBase || location.hostname.includes("onrender.com") ||
       location.hostname === "127.0.0.1" || location.hostname === "localhost") {
@@ -3194,7 +3210,13 @@ function closeProfile() {
 }
 
 async function api(path, method, body) {
-  await ensureApiBase();
+  // Auth/session calls must stay same-origin so the Netlify cookie (nonce/CSRF) is sent.
+  if (!isSessionApiPath(path)) {
+    await ensureApiBase();
+  } else if (apiBase) {
+    // A prior engine fallback switched us to Render — auth cannot use that.
+    apiBase = "";
+  }
   const headers = {};
   if (body) headers["Content-Type"] = "application/json";
   const m = (method || "GET").toUpperCase();
@@ -3206,7 +3228,16 @@ async function api(path, method, body) {
     headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   };
-  let resp = await fetchApi(path, opts);
+  const timeoutMs = isSessionApiPath(path) ? 25000 : 20000;
+  let resp;
+  try {
+    resp = await fetchWithTimeout(path, opts, timeoutMs);
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      throw new Error("Request timed out. The server may be waking up — wait a moment and try again.");
+    }
+    throw new Error(e?.message || "Failed to fetch");
+  }
   const hdrToken = resp.headers.get("X-CSRF-Token");
   if (hdrToken) csrfToken = hdrToken;
   let data;
@@ -3214,13 +3245,17 @@ async function api(path, method, body) {
     data = await readJson(resp);
   } catch (e) {
     // Netlify proxy miss / HTML error page — retry once against Render
-    // (same path as fetchEval / runReport; scan-blunders uses this helper).
-    if (e.isProxyMiss && !apiBase && RENDER_API) {
+    // (never for session/auth paths — cookies won't follow cross-origin).
+    if (e.isProxyMiss && !apiBase && RENDER_API && !isSessionApiPath(path)) {
       apiBase = RENDER_API;
-      resp = await fetchApi(path, opts);
+      resp = await fetchWithTimeout(path, opts, timeoutMs);
       const hdr2 = resp.headers.get("X-CSRF-Token");
       if (hdr2) csrfToken = hdr2;
       data = await readJson(resp);
+    } else if (e.isProxyMiss && isSessionApiPath(path)) {
+      throw new Error(
+        "Sign-in API timed out through the proxy. Wait a few seconds for the server to wake, then try again."
+      );
     } else {
       throw e;
     }
@@ -3533,6 +3568,16 @@ async function handleGoogleCredential(response) {
   }
   setGoogleSigningIn(true);
   setMsg(authGoogleMsg, "Verifying Google account\u2026");
+  // Watchdog so the modal can never sit on "Signing in…" forever.
+  const watchdog = setTimeout(() => {
+    if (!googleSignInBusy) return;
+    setGoogleSigningIn(false);
+    setMsg(
+      authGoogleMsg,
+      "Google sign-in timed out. Wait a few seconds (server may be waking up), then try again.",
+      "error"
+    );
+  }, 28000);
   try {
     const user = await api("/api/auth/google", "POST", { credential });
     // Refresh nonce for any later sign-in in this tab.
@@ -3540,12 +3585,16 @@ async function handleGoogleCredential(response) {
     googleIdentityReady = false;
     finishLogin(user, !!user.is_new_account);
   } catch (e) {
-    setMsg(authGoogleMsg, e.message, "error");
+    const msg = (e && e.name === "AbortError")
+      ? "Sign-in timed out. Wait a moment and try again."
+      : (e.message || "Google sign-in failed.");
+    setMsg(authGoogleMsg, msg, "error");
     // Mint a fresh nonce so the next Google click is not stuck on a used one.
     try { await refreshGoogleAuthConfig(); } catch (_) { /* ignore */ }
     googleIdentityReady = false;
-    await prepareGoogleSignIn();
+    try { await prepareGoogleSignIn(); } catch (_) { /* ignore */ }
   } finally {
+    clearTimeout(watchdog);
     setGoogleSigningIn(false);
   }
 }
