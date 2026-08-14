@@ -26,6 +26,39 @@ jobs:
           mkdir -p "$DATA_DIR"
           alembic upgrade head
 
+  stockfish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chess-repertoire
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Stockfish (primary + fallback)
+        run: bash scripts/download_stockfish.sh
+      - name: UCI smoke (primary)
+        run: |
+          test -x engine/linux/stockfish
+          printf 'uci\nquit\n' | engine/linux/stockfish | grep -i uciok
+      - name: UCI smoke (fallback)
+        run: |
+          test -x engine/linux/stockfish-fallback
+          printf 'uci\nquit\n' | engine/linux/stockfish-fallback | grep -i uciok
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pool warmup smoke
+        run: |
+          pip install -r requirements.txt
+          python - <<'PY'
+          from pathlib import Path
+          from webapp.engine_pool import create_engine_pool
+          pool = create_engine_pool(Path(".").resolve())
+          result = pool.warmup()
+          pool.shutdown()
+          assert result.get("warmup"), result
+          print("pool warmup OK", result.get("path"))
+          PY
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

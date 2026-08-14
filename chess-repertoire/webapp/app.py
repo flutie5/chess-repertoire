@@ -62,7 +62,7 @@ from repertoire import analyze, classify, fetch, lichess, moves, openings, parse
 from webapp.cache_util import BoundedLRU  # noqa: E402
 from webapp.db import connect as db_connect  # noqa: E402
 from webapp.disk_cache import cache_stats, enforce_cache_quota  # noqa: E402
-from webapp.engine_pool import EnginePool, resolve_engine_path  # noqa: E402
+from webapp.engine_pool import create_engine_pool  # noqa: E402
 from webapp.job_store import JobStore  # noqa: E402
 from webapp.logging_util import configure_logging, init_sentry  # noqa: E402
 from webapp.migrate import run_migrations, should_auto_migrate  # noqa: E402
@@ -662,10 +662,26 @@ def _user_payload(user: sqlite3.Row) -> dict:
 _games_cache: BoundedLRU = BoundedLRU(maxsize=64)
 _cache_lock = threading.Lock()
 
-# ---- Stockfish pool ----
+# ---- Stockfish pool (primary + fallback; download-on-missing on Linux) ----
 
-_engine_pool = EnginePool(resolve_engine_path(ROOT))
+_engine_pool = create_engine_pool(ROOT)
 atexit.register(_engine_pool.shutdown)
+
+# Warm up in production so Render health checks catch a dead binary before
+# traffic arrives. Local/dev stays lazy unless ENGINE_WARMUP=1.
+_ENGINE_WARMUP = os.environ.get("ENGINE_WARMUP", "1" if IS_PRODUCTION else "0").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+if _ENGINE_WARMUP:
+    try:
+        _warmup = _engine_pool.warmup()
+        if not _warmup.get("warmup"):
+            print(
+                f"WARNING: Stockfish warmup failed at boot: {_warmup.get('error') or _warmup}",
+                flush=True,
+            )
+    except Exception as _warmup_exc:
+        print(f"WARNING: Stockfish warmup raised: {_warmup_exc}", flush=True)
 
 _eval_cache: BoundedLRU = BoundedLRU(maxsize=512)
 _scan_eval_cache: BoundedLRU = BoundedLRU(maxsize=1024)
@@ -808,8 +824,18 @@ def index():
 
 @app.get("/api/health")
 def health():
-    """Liveness/readiness for Render and load balancers."""
-    pool = _engine_pool.status()
+    """Liveness/readiness for Render and load balancers.
+
+    In production, fails closed (503) when Stockfish cannot start so a
+    missing/corrupt binary cannot look "Live" while eval is broken.
+    Escape hatch: HEALTH_REQUIRE_ENGINE=0.
+    """
+    require_engine = os.environ.get(
+        "HEALTH_REQUIRE_ENGINE",
+        "1" if IS_PRODUCTION else "0",
+    ).strip().lower() in ("1", "true", "yes", "on")
+    # When engine is required, force-start so readiness reflects reality.
+    pool = _engine_pool.status(start=require_engine)
     disk_ok = True
     try:
         probe = CACHE_DIR / ".health_probe"
@@ -822,14 +848,18 @@ def health():
         pending = _job_store.pending_count()
     except Exception:
         pending = -1
-    status_code = 200 if disk_ok else 503
+    engine_ok = bool(pool.get("ok")) and bool(pool.get("path"))
+    ready = disk_ok and (engine_ok if require_engine else True)
+    status_code = 200 if ready else 503
     try:
         disk_cache = cache_stats(CACHE_DIR)
     except Exception:
         disk_cache = {"files": -1, "bytes": -1}
     return jsonify({
-        "ok": disk_ok,
-        "ready": bool(pool.get("ok")) and disk_ok,
+        "ok": ready,
+        "ready": ready,
+        "engine_required": require_engine,
+        "engine_ok": engine_ok,
         "engine_pool": pool,
         "jobs_pending": pending,
         "disk_ok": disk_ok,

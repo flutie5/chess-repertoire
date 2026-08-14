@@ -37,8 +37,8 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | Runtime | Python 3 |
 | Build command | `pip install -r requirements.txt && bash scripts/download_stockfish.sh` |
 | Start command | `gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` |
-| Health check | `/api/health` |
-| Root directory | repo root |
+| Health check | `/api/health` (503 if Stockfish cannot start in production) |
+| Root directory | `chess-repertoire` |
 
 **Keep `--workers 1`.** Report/scan jobs are durable in SQLite (`async_jobs`), but the Stockfish engine pool is in-process. Multiple Gunicorn workers would multiply engine processes and fragment rate-limit state. Raise workers only after engines move off the web process.
 
@@ -54,6 +54,9 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 | `ENGINE_POOL_SIZE` | `2` (concurrent Stockfish processes in this worker) |
 | `JOB_WORKERS` | `2` (thread pool for report/scan jobs) |
 | `ENGINE_THREADS` / `ENGINE_HASH_MB` | `1` / `16` (raise on paid CPU) |
+| `ENGINE_WARMUP` | `1` — start + analyse smoke at boot |
+| `HEALTH_REQUIRE_ENGINE` | `1` — `/api/health` 503 if Stockfish is down |
+| `ENGINE_DOWNLOAD_ON_MISSING` | `1` — re-run download script if binary missing at boot |
 | `RATE_LIMIT_ENGINE` / `REPORT` / `AUTH` | per-minute caps (defaults 30 / 10 / 20) |
 | `CURRENT_MONTH_CACHE_SECONDS` | `900` — short TTL for chess.com current-month disk cache |
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Web client ID from Google Cloud Console (for Sign in with Google) |
@@ -174,8 +177,9 @@ No Render domain changes are required — only Netlify serves the public site; A
 
 ## 6. First-deploy verification
 
-- [ ] Render service is **Live** (check Logs for Stockfish install + Gunicorn start)
-- [ ] `https://YOUR-SERVICE.onrender.com/api/health` returns JSON with `ok` / `engine_pool`
+- [ ] Render service is **Live** (check Logs for Stockfish install + warmup + Gunicorn start)
+- [ ] `https://YOUR-SERVICE.onrender.com/api/health` returns JSON with `ok: true`, `engine_ok: true`
+- [ ] `https://YOUR-SERVICE.onrender.com/api/engine-status` returns `ok: true` with a real `path`
 - [ ] `https://YOUR-SERVICE.onrender.com/api/me` returns `401` JSON (not 502)
 - [ ] Netlify site loads at `https://YOUR-SITE.netlify.app`
 - [ ] Register / login works (session cookie on Netlify domain)

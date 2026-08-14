@@ -2,6 +2,7 @@
 /** Legacy SPA logic extracted from the monolith index.html. */
 import { Chess } from "@vendor/chess.js";
 import { state, START_FEN } from "./state";
+import { evalFenLocal } from "./localEval";
 import {
   initProductAnalytics,
   identifyProductUser,
@@ -739,9 +740,9 @@ async function fetchEval(fen) {
       return;
     }
     if (resp.status === 503) {
-      engineAvailable = null;  // allow later retries (cold start / missing binary)
-      enginePanel.classList.add("visible");
-      labelEl.textContent = "Stockfish \u2014 " + (data.error || "engine unavailable");
+      // Server engine down — fall back to in-browser Stockfish WASM.
+      labelEl.textContent = "Stockfish — server unavailable, using browser engine…";
+      await fetchEvalLocal(fen, token);
       return;
     }
     if (!resp.ok) {
@@ -752,11 +753,48 @@ async function fetchEval(fen) {
     evalCache.set(fen, data);
     if (token === evalToken && fen === currentFen()) renderEval(data);
   } catch (e) {
+    // Network / proxy failure — try WASM before giving up.
+    try {
+      labelEl.textContent = "Stockfish — trying browser engine…";
+      await fetchEvalLocal(fen, token);
+      return;
+    } catch (_) { /* fall through */ }
     if (token === evalToken) {
       enginePanel.classList.add("visible");
       labelEl.textContent = "Stockfish \u2014 " + (e.message || "engine unavailable");
     }
   }
+}
+
+function uciToSan(fen, uci) {
+  try {
+    const c = new Chess(fen);
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const promotion = uci.length > 4 ? uci[4] : undefined;
+    const m = c.move({ from, to, promotion });
+    return m ? m.san : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchEvalLocal(fen, token) {
+  const raw = await evalFenLocal(fen);
+  if (token !== evalToken || fen !== currentFen()) return;
+  const bestSan = raw.best_san ? (uciToSan(fen, raw.best_san) || raw.best_san) : null;
+  const data = {
+    cp: raw.cp,
+    mate: raw.mate,
+    best_san: bestSan,
+    pv_san: bestSan || "",
+    depth: raw.depth,
+    source: "wasm",
+  };
+  engineAvailable = true;
+  evalCache.set(fen, data);
+  renderEval(data);
+  labelEl.textContent = `Stockfish (browser) \u2014 depth ${data.depth}`;
 }
 
 function renderEval(data) {

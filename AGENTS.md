@@ -32,13 +32,16 @@ a Vite-built SPA from `chess-repertoire/webapp/static/` (source under
 
 ### Non-obvious gotchas
 
-- Stockfish is required only for the eval bar / game-review endpoints (`/api/eval`,
-  `/api/annotate-game`, `/api/scan-blunders`). The binary is NOT committed; it lives
-  at `chess-repertoire/engine/linux/stockfish` (gitignored). If it is missing, run
-  `bash scripts/download_stockfish.sh` from `chess-repertoire/` (downloads ~76 MB
-  from GitHub). The core opening-report flow works without it. `/api/eval` is
-  free (rate-limited); annotate/scan require Pro when Stripe is configured. Keep Gunicorn
-  `--workers 1` while Stockfish runs in-process.
+- Stockfish is required for the eval bar / game-review endpoints (`/api/eval`,
+  `/api/annotate-game`, `/api/scan-blunders`). Binaries are NOT committed; the
+  download script installs `engine/linux/stockfish` (primary) plus
+  `engine/linux/stockfish-fallback`. Run `bash scripts/download_stockfish.sh`
+  from `chess-repertoire/`. On Linux boot the app can re-download if missing
+  (`ENGINE_DOWNLOAD_ON_MISSING`). Production `/api/health` fails closed when the
+  engine cannot start (`HEALTH_REQUIRE_ENGINE`). The SPA also falls back to an
+  in-browser Stockfish WASM worker for the eval bar if the server returns 503.
+  `/api/eval` is free (rate-limited); annotate/scan require Pro when Stripe is
+  configured. Keep Gunicorn `--workers 1` while Stockfish runs in-process.
 - The report flow (`/api/report?username=...`) fetches real games from the public
   chess.com API over the network — no API key needed. Completed months are cached to
   `.chesscom-cache/` (quotas: `CACHE_MAX_MB` / `CACHE_MAX_FILES`).

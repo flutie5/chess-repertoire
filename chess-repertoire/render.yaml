@@ -8,11 +8,14 @@
 #   cannot absorb concurrent report/engine load.
 # - Tunables: ENGINE_POOL_SIZE, JOB_WORKERS, ENGINE_THREADS, ENGINE_HASH_MB,
 #   RATE_LIMIT_*, CURRENT_MONTH_CACHE_SECONDS (see .env.example / DEPLOY.md).
+# - rootDir must be chess-repertoire so build/start + Stockfish download paths
+#   resolve correctly in this monorepo.
 services:
   - type: web
     name: chess-repertoire-api
     runtime: python
     plan: free
+    rootDir: chess-repertoire
     buildCommand: pip install -r requirements.txt && bash scripts/download_stockfish.sh
     startCommand: gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     healthCheckPath: /api/health
@@ -33,6 +36,12 @@ services:
         value: "1"
       - key: ENGINE_HASH_MB
         value: "16"
+      - key: ENGINE_WARMUP
+        value: "1"
+      - key: HEALTH_REQUIRE_ENGINE
+        value: "1"
+      - key: ENGINE_DOWNLOAD_ON_MISSING
+        value: "1"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: ANALYTICS_ADMIN_EMAIL

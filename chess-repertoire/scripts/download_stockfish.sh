@@ -1,40 +1,62 @@
 #!/usr/bin/env bash
-# Download official Stockfish Linux binary for Render builds.
-# Prefer the generic x86-64 build (not AVX2/BMI2) so free-tier VMs without
+# Download official Stockfish Linux binaries for Render builds.
+# Installs a primary + fallback binary so a bad ISA / corrupt primary
+# can be swapped without a full redeploy dance.
+#
+# Prefer generic x86-64 builds (not AVX2/BMI2) so free-tier VMs without
 # those instruction sets do not SIGILL at runtime.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE_DIR="$ROOT/engine/linux"
-SF_TAG="${STOCKFISH_VERSION:-sf_17.1}"
+PRIMARY_TAG="${STOCKFISH_VERSION:-sf_17.1}"
+FALLBACK_TAG="${STOCKFISH_FALLBACK_VERSION:-sf_16}"
+
 # Portable first; sse41 as fallback if the generic archive ever disappears.
-ARCHIVES=(
+PRIMARY_ARCHIVES=(
   "${STOCKFISH_ARCHIVE:-stockfish-ubuntu-x86-64.tar}"
+  "stockfish-ubuntu-x86-64-sse41-popcnt.tar"
+)
+FALLBACK_ARCHIVES=(
+  "${STOCKFISH_FALLBACK_ARCHIVE:-stockfish-ubuntu-x86-64.tar}"
   "stockfish-ubuntu-x86-64-sse41-popcnt.tar"
 )
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+pick_binary() {
+  local extract_dir="$1"
+  local bin=""
+  bin="$(find "$extract_dir" -type f -name 'stockfish-ubuntu-x86-64' -print | head -n 1 || true)"
+  if [[ -z "$bin" ]]; then
+    bin="$(find "$extract_dir" -type f -name 'stockfish-ubuntu-x86-64-sse41-popcnt' -print | head -n 1 || true)"
+  fi
+  if [[ -z "$bin" ]]; then
+    bin="$(find "$extract_dir" -type f \( -name 'stockfish-ubuntu*' -o -name 'stockfish' \) \
+      ! -name '*.exe' ! -name '*avx*' ! -name '*bmi*' ! -name '*vnni*' -print | head -n 1 || true)"
+  fi
+  printf '%s' "$bin"
+}
+
+uci_smoke() {
+  local bin="$1"
+  printf 'uci\nquit\n' | "$bin" >/dev/null 2>&1
+}
+
 download_and_install() {
-  local archive="$1"
-  local url="https://github.com/official-stockfish/Stockfish/releases/download/${SF_TAG}/${archive}"
-  echo "Downloading Stockfish ${SF_TAG} (${archive})..."
+  local tag="$1"
+  local archive="$2"
+  local dest_name="$3"
+  local url="https://github.com/official-stockfish/Stockfish/releases/download/${tag}/${archive}"
+  echo "Downloading Stockfish ${tag} (${archive}) → ${dest_name}..."
   curl -fsSL -o "$TMP/$archive" "$url"
   rm -rf "$TMP/extract"
   mkdir -p "$TMP/extract"
   tar -xf "$TMP/$archive" -C "$TMP/extract"
 
-  # Prefer the baseline binary name; never pick *avx* / *bmi* / *vnni* by accident.
-  local bin=""
-  bin="$(find "$TMP/extract" -type f -name 'stockfish-ubuntu-x86-64' -print | head -n 1 || true)"
-  if [[ -z "$bin" ]]; then
-    bin="$(find "$TMP/extract" -type f -name 'stockfish-ubuntu-x86-64-sse41-popcnt' -print | head -n 1 || true)"
-  fi
-  if [[ -z "$bin" ]]; then
-    bin="$(find "$TMP/extract" -type f \( -name 'stockfish-ubuntu*' -o -name 'stockfish' \) \
-      ! -name '*.exe' ! -name '*avx*' ! -name '*bmi*' ! -name '*vnni*' -print | head -n 1 || true)"
-  fi
+  local bin
+  bin="$(pick_binary "$TMP/extract")"
   if [[ -z "$bin" || ! -f "$bin" ]]; then
     echo "ERROR: stockfish binary not found inside ${archive}" >&2
     echo "Archive contents:" >&2
@@ -43,28 +65,49 @@ download_and_install() {
   fi
 
   mkdir -p "$ENGINE_DIR"
-  install -m 755 "$bin" "$ENGINE_DIR/stockfish"
-  echo "Installed Stockfish at ${ENGINE_DIR}/stockfish from ${archive} ($(du -h "$ENGINE_DIR/stockfish" | cut -f1))"
+  install -m 755 "$bin" "$ENGINE_DIR/$dest_name"
 
-  # Smoke-test: binary must start and accept UCI (wrong ISA / missing libs).
-  if ! printf 'uci\nquit\n' | "$ENGINE_DIR/stockfish" >/dev/null 2>&1; then
-    echo "ERROR: Stockfish failed UCI smoke test at ${ENGINE_DIR}/stockfish" >&2
+  if ! uci_smoke "$ENGINE_DIR/$dest_name"; then
+    echo "ERROR: Stockfish failed UCI smoke test at ${ENGINE_DIR}/${dest_name}" >&2
+    rm -f "$ENGINE_DIR/$dest_name"
     return 1
   fi
-  echo "Stockfish UCI smoke test OK"
+  echo "Installed Stockfish at ${ENGINE_DIR}/${dest_name} from ${tag}/${archive} ($(du -h "$ENGINE_DIR/$dest_name" | cut -f1))"
   return 0
 }
 
-INSTALLED=0
-for ARCHIVE in "${ARCHIVES[@]}"; do
-  if download_and_install "$ARCHIVE"; then
-    INSTALLED=1
-    break
-  fi
-  echo "WARNING: failed to install ${ARCHIVE}, trying next fallback…" >&2
-done
+install_role() {
+  local tag="$1"
+  local dest_name="$2"
+  shift 2
+  local archives=("$@")
+  local archive
+  for archive in "${archives[@]}"; do
+    if download_and_install "$tag" "$archive" "$dest_name"; then
+      return 0
+    fi
+    echo "WARNING: failed to install ${tag}/${archive} as ${dest_name}, trying next…" >&2
+  done
+  return 1
+}
 
-if [[ "$INSTALLED" -ne 1 ]]; then
-  echo "ERROR: could not download a working Stockfish binary" >&2
+if ! install_role "$PRIMARY_TAG" "stockfish" "${PRIMARY_ARCHIVES[@]}"; then
+  echo "ERROR: could not download a working primary Stockfish binary" >&2
   exit 1
 fi
+
+# Fallback is best-effort — primary alone is enough to boot, but we want
+# a second binary when GitHub still has the older release.
+if ! install_role "$FALLBACK_TAG" "stockfish-fallback" "${FALLBACK_ARCHIVES[@]}"; then
+  echo "WARNING: fallback Stockfish (${FALLBACK_TAG}) unavailable; continuing with primary only" >&2
+  # Mirror primary so resolve_engine_candidates always has two paths to try
+  # after a partial pool spawn failure against a corrupted primary inode.
+  if [[ -x "$ENGINE_DIR/stockfish" && ! -x "$ENGINE_DIR/stockfish-fallback" ]]; then
+    cp -f "$ENGINE_DIR/stockfish" "$ENGINE_DIR/stockfish-fallback"
+    chmod 755 "$ENGINE_DIR/stockfish-fallback"
+    echo "Copied primary → stockfish-fallback as last-resort duplicate"
+  fi
+fi
+
+echo "Stockfish binaries ready:"
+ls -la "$ENGINE_DIR"/stockfish "$ENGINE_DIR"/stockfish-fallback 2>/dev/null || ls -la "$ENGINE_DIR"
