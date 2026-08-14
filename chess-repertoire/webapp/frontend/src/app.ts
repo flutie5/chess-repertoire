@@ -708,9 +708,11 @@ function scheduleEval() {
 async function fetchEval(fen) {
   const token = ++evalToken;
   const path = `/api/eval?fen=${encodeURIComponent(fen)}`;
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
   try {
     await ensureApiBase();
-    let resp = await fetchApi(path);
+    let resp = await fetchApi(path, ctrl ? { signal: ctrl.signal } : {});
     let data;
     try {
       data = await readJson(resp);
@@ -720,6 +722,10 @@ async function fetchEval(fen) {
         apiBase = RENDER_API;
         resp = await fetchApi(path);
         data = await readJson(resp);
+      } else if (e.isProxyMiss || e.httpStatus === 504 || e.httpStatus === 502) {
+        labelEl.textContent = "Stockfish — proxy timed out, using browser engine…";
+        await fetchEvalLocal(fen, token);
+        return;
       } else {
         throw e;
       }
@@ -739,8 +745,8 @@ async function fetchEval(fen) {
       labelEl.textContent = "Stockfish — busy, retrying shortly…";
       return;
     }
-    if (resp.status === 503) {
-      // Server engine down — fall back to in-browser Stockfish WASM.
+    if (resp.status === 503 || resp.status === 504 || resp.status === 502) {
+      // Server engine down / gateway timeout — fall back to in-browser Stockfish WASM.
       labelEl.textContent = "Stockfish — server unavailable, using browser engine…";
       await fetchEvalLocal(fen, token);
       return;
@@ -753,7 +759,7 @@ async function fetchEval(fen) {
     evalCache.set(fen, data);
     if (token === evalToken && fen === currentFen()) renderEval(data);
   } catch (e) {
-    // Network / proxy failure — try WASM before giving up.
+    // Network / abort / proxy failure — try WASM before giving up.
     try {
       labelEl.textContent = "Stockfish — trying browser engine…";
       await fetchEvalLocal(fen, token);
@@ -761,8 +767,13 @@ async function fetchEval(fen) {
     } catch (_) { /* fall through */ }
     if (token === evalToken) {
       enginePanel.classList.add("visible");
-      labelEl.textContent = "Stockfish \u2014 " + (e.message || "engine unavailable");
+      const msg = (e && e.name === "AbortError")
+        ? "server too slow — browser engine also unavailable"
+        : (e.message || "engine unavailable");
+      labelEl.textContent = "Stockfish \u2014 " + msg;
     }
+  } finally {
+    if (abortTimer) clearTimeout(abortTimer);
   }
 }
 
@@ -2645,14 +2656,21 @@ const meBtn = document.getElementById("analyze-me-btn");
 let lastAnalyze = analyzeUser;   // rerun on time-control change (user vs "me" report)
 
 /** Optional direct API base (set via window.OPENING_EXPLORER_API or meta tag).
- * Prefer same-origin /api proxy; only fall back when an explicit base is configured. */
+ * Prefer same-origin /api proxy; keep a Render default on custom domains so a
+ * Netlify proxy timeout can fall back instead of surfacing "Failed to fetch". */
+const DEFAULT_RENDER_API = "https://chess-repertoire-bteo.onrender.com";
 function configuredApiBase() {
   if (typeof window.OPENING_EXPLORER_API === "string" && window.OPENING_EXPLORER_API.trim()) {
     return window.OPENING_EXPLORER_API.trim().replace(/\/$/, "");
   }
   const meta = document.querySelector('meta[name="opening-explorer-api"]');
   const content = meta?.getAttribute("content")?.trim();
-  return content ? content.replace(/\/$/, "") : "";
+  if (content) return content.replace(/\/$/, "");
+  const host = typeof location !== "undefined" ? location.hostname : "";
+  if (!host || host === "localhost" || host === "127.0.0.1" || host.includes("onrender.com")) {
+    return "";
+  }
+  return DEFAULT_RENDER_API;
 }
 const RENDER_API = configuredApiBase();
 let apiBase = "";  // "" = same origin
@@ -2741,7 +2759,8 @@ async function ensureApiBase() {
   try {
     const resp = await fetch("/api/me", { credentials: "same-origin" });
     const text = await resp.text();
-    if (looksLikeProxyMiss(resp.status, text) && resp.status === 404 &&
+    if (looksLikeProxyMiss(resp.status, text) &&
+        (resp.status === 404 || resp.status === 502 || resp.status === 504) &&
         (text.trim().startsWith("Not Found") || !text.trim().startsWith("{"))) {
       // Confirm it's not Flask JSON 401
       try { JSON.parse(text); return; } catch (_) {}

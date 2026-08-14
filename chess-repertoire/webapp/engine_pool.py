@@ -305,14 +305,15 @@ class EnginePool:
             }
 
     def warmup(self) -> dict:
-        """Start the pool and run a 1-ply analysis smoke test."""
+        """Start the pool and run a timed analysis smoke test."""
         st = self.status(start=True)
         if not st.get("ok"):
             return {**st, "warmup": False, "error": "engine failed to start"}
         try:
             board = chess.Board()
             with self.acquire(timeout=20) as engine:
-                engine.analyse(board, chess.engine.Limit(depth=2))
+                # Time-capped so boot cannot hang the web process.
+                engine.analyse(board, chess.engine.Limit(depth=4, time=1.0))
             print(f"Stockfish warmup OK at {self._path}", flush=True)
             return {**self.status(), "warmup": True}
         except Exception as exc:

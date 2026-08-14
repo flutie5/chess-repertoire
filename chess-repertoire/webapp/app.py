@@ -112,6 +112,10 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 VALID_TIME_CLASSES = {"rapid", "blitz", "bullet", "daily"}
 VALID_SOURCES = {"chesscom", "lichess", "both"}
 EVAL_DEPTH = 16
+# Hard wall-clock cap so a wedged Stockfish process cannot block the
+# single Gunicorn worker (which looks like "Failed to fetch" on Netlify).
+EVAL_TIME_SEC = float(os.environ.get("EVAL_TIME_SEC", "2.0"))
+EVAL_HARD_TIMEOUT_SEC = float(os.environ.get("EVAL_HARD_TIMEOUT_SEC", "8.0"))
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -667,6 +671,39 @@ _cache_lock = threading.Lock()
 _engine_pool = create_engine_pool(ROOT)
 atexit.register(_engine_pool.shutdown)
 
+
+def _engine_analyse(engine, board, *, depth: int | None = None, time_sec: float | None = None,
+                    multipv: int | None = None, hard_timeout: float | None = None):
+    """Run engine.analyse with a Limit time cap and a hard thread timeout.
+
+    If Stockfish stops responding, the hard timeout fires, the engine is
+    treated as broken by the caller, and the worker stays responsive.
+    """
+    import concurrent.futures
+
+    limit_kwargs = {}
+    if depth is not None:
+        limit_kwargs["depth"] = depth
+    limit_kwargs["time"] = EVAL_TIME_SEC if time_sec is None else time_sec
+    limit = chess.engine.Limit(**limit_kwargs)
+    timeout = EVAL_HARD_TIMEOUT_SEC if hard_timeout is None else hard_timeout
+
+    def _run():
+        if multipv:
+            return engine.analyse(board, limit, multipv=multipv)
+        return engine.analyse(board, limit)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(_run)
+        try:
+            return fut.result(timeout=timeout)
+        except concurrent.futures.TimeoutError as exc:
+            # Signal acquire() to recycle this engine process.
+            raise chess.engine.EngineError(
+                f"Stockfish analyse timed out after {timeout:.1f}s"
+            ) from exc
+
+
 # Warm up in production so Render health checks catch a dead binary before
 # traffic arrives. Local/dev stays lazy unless ENGINE_WARMUP=1.
 _ENGINE_WARMUP = os.environ.get("ENGINE_WARMUP", "1" if IS_PRODUCTION else "0").strip().lower() in (
@@ -920,13 +957,18 @@ def evaluate():
 
     try:
         try:
-            with _engine_pool.acquire(timeout=15) as engine:
+            with _engine_pool.acquire(timeout=5) as engine:
                 _engine_pool.configure_full_strength(engine)
-                info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
+                info = _engine_analyse(
+                    engine, board, depth=EVAL_DEPTH, time_sec=EVAL_TIME_SEC
+                )
         except TimeoutError:
             return _engine_busy_response()
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 503
+        except chess.engine.EngineError as exc:
+            print(f"WARNING: /api/eval engine error: {exc}", flush=True)
+            return jsonify({"error": "Stockfish timed out — try again"}), 503
 
         if "score" not in info:
             return jsonify({"error": "engine returned no score"}), 500
