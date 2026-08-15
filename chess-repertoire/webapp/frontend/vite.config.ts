@@ -32,7 +32,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["opening-explorer-logo.png", "pieces/*.png"],
+      includeAssets: ["opening-explorer-logo.png", "pieces/*.png", "privacy.html", "terms.html"],
       manifest: {
         name: "Opening Explorer",
         short_name: "Opening Explorer",
@@ -52,6 +52,12 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
+        navigateFallbackDenylist: [
+          /\/privacy(?:\.html)?$/,
+          /\/terms(?:\.html)?$/,
+          /\/vendor\//,
+          /\/api\//,
+        ],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/api/"),

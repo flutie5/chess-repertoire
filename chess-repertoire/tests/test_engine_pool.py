@@ -59,15 +59,17 @@ def test_ensure_skips_download_when_present(tmp_path, monkeypatch):
     assert cands[0] == primary
 
 
-def test_pool_missing_engine_raises():
-    pool = EnginePool(None, size=1)
-    status = pool.status(start=True)
-    assert status["ok"] is False
-    assert status["path"] is None
-    with pytest.raises(RuntimeError, match="not found"):
-        with pool.acquire(timeout=0.1):
-            pass
-    pool.shutdown()
+def test_resolve_skips_docs(tmp_path, monkeypatch):
+    monkeypatch.delenv("STOCKFISH_PATH", raising=False)
+    monkeypatch.delenv("STOCKFISH_FALLBACK_PATH", raising=False)
+    wiki = tmp_path / "engine" / "stockfish" / "wiki"
+    wiki.mkdir(parents=True)
+    (wiki / "Stockfish-FAQ.md").write_text("# faq", encoding="utf-8")
+    exe = tmp_path / "engine" / "stockfish" / "stockfish-windows-x86-64-avx2.exe"
+    exe.write_bytes(b"MZ")
+    cands = resolve_engine_candidates(tmp_path)
+    assert cands == [exe]
+    assert all(p.suffix.lower() != ".md" for p in cands)
 
 
 def test_pool_candidates_empty():

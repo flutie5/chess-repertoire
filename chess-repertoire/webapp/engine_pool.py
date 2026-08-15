@@ -68,10 +68,17 @@ def resolve_engine_candidates(root: Path) -> list[Path]:
     for path in sorted(engine_dir.rglob("stockfish*.exe")):
         add(path)
 
-    # Any other non-.exe stockfish binary under engine/.
+    # Any other non-.exe stockfish binary under engine/ (Linux builds, etc.).
+    # Skip docs/scripts — rglob("stockfish*") otherwise picks wiki/*.md.
+    _skip_suffixes = {".md", ".txt", ".html", ".htm", ".json", ".yml", ".yaml", ".py", ".sh"}
     for path in sorted(engine_dir.rglob("stockfish*")):
-        if path.is_file() and path.suffix.lower() != ".exe":
-            add(path)
+        if not path.is_file() or path.suffix.lower() == ".exe":
+            continue
+        if path.suffix.lower() in _skip_suffixes:
+            continue
+        if not os.access(path, os.X_OK) and not sys.platform.startswith("win"):
+            continue
+        add(path)
 
     return found
 
@@ -265,10 +272,7 @@ class EnginePool:
                     return True
                 # Tear down partial pool and try next binary.
                 for engine in list(self._all):
-                    try:
-                        engine.quit()
-                    except Exception:
-                        pass
+                    _force_kill_engine(engine, wait=1.0)
                 self._all.clear()
                 self._available.clear()
                 if not self._try_next_candidate():
@@ -346,39 +350,40 @@ class EnginePool:
         *,
         broken: bool = False,
     ) -> None:
+        # IMPORTANT: never call quit()/kill while holding _cond — a wedged
+        # Stockfish would block every other acquire on the only Gunicorn worker.
+        dispose = False
         with self._cond:
             if broken or engine not in self._all:
-                try:
-                    engine.quit()
-                except Exception:
-                    pass
+                dispose = True
                 if engine in self._all:
                     self._all.remove(engine)
-                replacement = self._spawn()
-                if replacement is None and self._try_next_candidate():
-                    # Rebuild one engine on the new binary.
-                    replacement = self._spawn()
-                if replacement is not None:
-                    self._all.append(replacement)
-                    self._available.append(replacement)
+                if engine in self._available:
+                    self._available.remove(engine)
             else:
                 try:
                     self.configure_full_strength(engine)
                 except Exception:
-                    try:
-                        engine.quit()
-                    except Exception:
-                        pass
+                    dispose = True
                     if engine in self._all:
                         self._all.remove(engine)
-                    replacement = self._spawn()
-                    if replacement is not None:
-                        self._all.append(replacement)
-                        self._available.append(replacement)
+                    if engine in self._available:
+                        self._available.remove(engine)
+                else:
+                    self._available.append(engine)
                     self._cond.notify()
                     return
-                self._available.append(engine)
-            self._cond.notify()
+
+        if dispose:
+            _force_kill_engine(engine, wait=1.0)
+            replacement = self._spawn()
+            if replacement is None and self._try_next_candidate():
+                replacement = self._spawn()
+            with self._cond:
+                if replacement is not None:
+                    self._all.append(replacement)
+                    self._available.append(replacement)
+                self._cond.notify()
 
     @contextmanager
     def acquire(
@@ -406,10 +411,51 @@ class EnginePool:
             self._failed = False
             self._started = False
         for engine in engines:
-            try:
-                engine.quit()
-            except Exception:
-                pass
+            _force_kill_engine(engine, wait=1.0)
+
+
+def _engine_proc(engine: chess.engine.SimpleEngine):
+    """Return the underlying subprocess.Popen if available."""
+    transport = getattr(engine, "transport", None)
+    if transport is None:
+        return None
+    return getattr(transport, "_proc", None) or getattr(transport, "process", None)
+
+
+def _force_kill_engine(engine: chess.engine.SimpleEngine, *, wait: float = 1.0) -> None:
+    """Dispose a Stockfish process without blocking the request thread.
+
+    engine.quit() can hang forever if analyse is wedged. Prefer a timed quit
+    thread, then OS-level kill via the asyncio subprocess transport.
+    """
+    done = threading.Event()
+
+    def _quit() -> None:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_quit, daemon=True, name="sf-quit").start()
+    if done.wait(timeout=wait):
+        return
+
+    # quit() hung — hard-kill the OS process.
+    try:
+        transport = getattr(engine, "transport", None)
+        if transport is not None and hasattr(transport, "kill"):
+            transport.kill()
+    except Exception as exc:
+        print(f"WARNING: transport.kill failed: {exc}", flush=True)
+    proc = _engine_proc(engine)
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception as exc:
+            print(f"WARNING: proc.kill failed: {exc}", flush=True)
 
 
 def create_engine_pool(root: Path) -> EnginePool:

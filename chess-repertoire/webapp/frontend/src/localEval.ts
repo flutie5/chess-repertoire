@@ -65,6 +65,32 @@ function onMessage(e: MessageEvent) {
   });
 }
 
+async function workerUrlFor(url: string): Promise<string> {
+  if (!url.startsWith("http") && !url.startsWith("/")) {
+    return url;
+  }
+  // Same-origin /vendor/stockfish.js used to 200 with SPA HTML when the file
+  // was missing — that silently breaks Worker init. Probe content-type/body.
+  const res = await fetch(url, { cache: "force-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  const ctype = (res.headers.get("content-type") || "").toLowerCase();
+  const buf = await res.arrayBuffer();
+  const head = new TextDecoder().decode(buf.slice(0, 64)).trim().toLowerCase();
+  if (
+    ctype.includes("text/html") ||
+    head.startsWith("<!doctype") ||
+    head.startsWith("<html")
+  ) {
+    throw new Error(`Not a Stockfish worker script: ${url} (${ctype || "unknown type"})`);
+  }
+  const blob = new Blob([buf], {
+    type: ctype.includes("javascript") || ctype.includes("ecmascript")
+      ? ctype
+      : "application/javascript",
+  });
+  return URL.createObjectURL(blob);
+}
+
 async function ensureWorker(): Promise<Worker> {
   if (worker) return worker;
   if (readyPromise) return readyPromise;
@@ -72,12 +98,7 @@ async function ensureWorker(): Promise<Worker> {
     let lastErr: Error | null = null;
     for (const url of WORKER_URLS) {
       try {
-        let workerUrl = url;
-        if (url.startsWith("http")) {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-          workerUrl = URL.createObjectURL(await res.blob());
-        }
+        const workerUrl = await workerUrlFor(url);
         const w = new Worker(workerUrl);
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error("WASM init timeout")), 15000);

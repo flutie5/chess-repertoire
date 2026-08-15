@@ -1586,6 +1586,31 @@
     padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
   }
   button.ghost:hover { border-color: var(--green); background: var(--bg-card-hover); }
+  button.danger {
+    flex: 1; background: transparent; color: var(--loss-red);
+    border: 1px solid var(--loss-red); border-radius: var(--radius-sm);
+    padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.danger:hover { background: rgba(250, 65, 45, 0.12); }
+  .legal-line {
+    margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-muted);
+  }
+  .legal-line a { color: var(--text-secondary); }
+  .legal-line a:hover { color: var(--green); }
+  .site-footer {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    padding: 16px 22px 24px; border-top: 1px solid var(--border-subtle);
+    color: var(--text-muted); font-size: 12px;
+  }
+  .site-footer .legal-notice { margin: 0; flex: 1 1 280px; line-height: 1.45; }
+  .site-footer nav { display: flex; gap: 14px; }
+  .site-footer a { color: var(--text-secondary); text-decoration: none; }
+  .site-footer a:hover { color: var(--green); }
+  .rep-ai-note {
+    margin: 8px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.45;
+  }
+  .rep-ai-note a { color: var(--text-secondary); }
+  .rep-ai-note a:hover { color: var(--green); }
 
   /* ---- profile page ---- */
   #profile-view {

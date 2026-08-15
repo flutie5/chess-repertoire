@@ -3564,6 +3564,31 @@ async function logout() {
   warmGoogleSignIn();
 }
 
+async function deleteAccount() {
+  const msg = document.getElementById("profile-delete-msg");
+  const typed = window.prompt(
+    "This permanently deletes your Opening Explorer account, repertoire, imported PGN, and study data. Type DELETE to confirm."
+  );
+  if (typed === null) return;
+  if (typed.trim() !== "DELETE") {
+    setMsg(msg, "Deletion cancelled — type DELETE exactly to confirm.", "error");
+    return;
+  }
+  setMsg(msg, "Deleting\u2026");
+  try {
+    await api("/api/me", "DELETE", { confirm: "DELETE" });
+    setUser(null);
+    googleIdentityReady = false;
+    googleNonce = "";
+    googleWarmupPromise = null;
+    siteConfigPromise = null;
+    warmGoogleSignIn();
+    alert("Your account and stored data have been deleted.");
+  } catch (e) {
+    setMsg(msg, e.message || "Could not delete account.", "error");
+  }
+}
+
 function setGoogleSigningIn(busy) {
   googleSignInBusy = !!busy;
   const wrap = document.getElementById("auth-google-wrap");
@@ -3874,6 +3899,7 @@ document.getElementById("menu-profile").onclick = openProfile;
 document.getElementById("menu-logout").onclick = logout;
 document.getElementById("profile-back").onclick = closeProfile;
 document.getElementById("profile-logout-btn").onclick = logout;
+document.getElementById("profile-delete-btn")?.addEventListener("click", deleteAccount);
 
 document.getElementById("profile-save-btn").onclick = async () => {
   setMsg(profileMsg, "Saving\u2026");
@@ -6168,6 +6194,11 @@ async function importRepertoirePgn() {
 async function runAiCoach() {
   if (!state.report) {
     alert("Analyze a username first for coach notes.");
+    return;
+  }
+  if (!window.confirm(
+    "AI coach uses Anthropic Claude. Your opening statistics from this report will be sent to Anthropic. Continue?"
+  )) {
     return;
   }
   const box = document.getElementById("rep-train-today");

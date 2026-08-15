@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Opening Explorer</title>
+<style>
+  :root {
+    --bg: #312e2b;
+    --card: #262421;
+    --text: rgba(255,255,255,.92);
+    --muted: rgba(255,255,255,.55);
+    --link: #4d8fd9;
+    --border: rgba(255,255,255,.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.55 "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 22px 64px; }
+  a { color: var(--link); }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 28px 0 8px; }
+  p, li { color: rgba(255,255,255,.82); }
+  .meta { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; margin: 16px 0;
+  }
+  nav { margin-bottom: 24px; font-size: 14px; }
+  nav a { color: var(--muted); text-decoration: none; margin-right: 14px; }
+  nav a:hover { color: var(--link); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a href="/">Opening Explorer</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </nav>
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: August 15, 2026 · Opening Explorer (<a href="https://opening-explorer.com">opening-explorer.com</a>)</p>
+
+  <p>
+    We collect account, usage, and chess data to run this service. This page
+    describes what that means, including our use of chess engines and third-party
+    AI. It is a description of our practices, not legal advice.
+  </p>
+
+  <h2>1. What we collect</h2>
+  <ul>
+    <li><strong>Account:</strong> email, password hash (or Google account id if you use Google sign-in), optional display name, linked chess.com and Lichess usernames, plan/billing status.</li>
+    <li><strong>Chess data you give us:</strong> opening reports you run, repertoire lines, imported PGN, pasted FEN/PGN for the board, practice and spaced-repetition cards, shared-report snapshots you create.</li>
+    <li><strong>Public games:</strong> when you analyze a username, we fetch that player’s public games from chess.com and/or Lichess. We do not receive private or unlisted games from those sites.</li>
+    <li><strong>Usage:</strong> login sessions (including user agent and IP), Analyze lookups, and product events. If analytics are enabled, this can include pages visited and (with PostHog) session replay.</li>
+    <li><strong>Payments:</strong> if you subscribe to Pro, Stripe handles card details. We store Stripe customer and subscription ids, not your full card number.</li>
+  </ul>
+
+  <h2>2. Artificial intelligence and chess engines</h2>
+  <div class="card">
+    <p><strong>We use automated analysis tools on chess positions and, if you use AI coach, a third-party large language model.</strong></p>
+    <ul>
+      <li><strong>Stockfish</strong> (open-source chess engine) runs on our servers for the eval bar, best-move hints, game review, blunder scan, and repertoire practice. Positions, moves, and related game context you analyze are sent to our backend so Stockfish can score them. This is not a generative AI model and is not sent to Anthropic.</li>
+      <li><strong>Anthropic Claude</strong> powers the in-app <em>AI coach</em> (and optional CLI recommendations) when an Anthropic API key is configured. If you click AI coach, we send aggregated opening statistics from your report (opening names, game counts, scores, and similar summary stats — not your password) to Anthropic so Claude can write coaching notes. Anthropic processes that content under their terms and privacy policy.</li>
+    </ul>
+    <p>We do not use your chess data to train our own foundation model. Third-party providers may process prompts according to their own policies.</p>
+  </div>
+
+  <h2>3. Third parties who may receive data</h2>
+  <p>Depending on which features are enabled on this deployment:</p>
+  <ul>
+    <li><strong>Google:</strong> Google Identity Services if you sign in with Google; Google Analytics (GA4) for traffic/audience when a measurement ID is configured (production may use a default GA4 id).</li>
+    <li><strong>Stripe:</strong> checkout, customer portal, and subscription webhooks for Pro billing.</li>
+    <li><strong>PostHog:</strong> product analytics (people profiles with email when you are logged in, events, and possibly session replay) when a PostHog project key is configured.</li>
+    <li><strong>Anthropic:</strong> AI coach prompts as described above.</li>
+    <li><strong>chess.com and Lichess:</strong> we request public player/game data from their APIs. We do not sell your account to them.</li>
+    <li><strong>Hosting:</strong> the website is typically served via Netlify; the API and database via Render (or the operator’s equivalent). Server logs may include IP addresses and request paths.</li>
+  </ul>
+  <p>
+    Each provider has its own privacy policy. We do not sell your personal information.
+  </p>
+
+  <h2>4. Cookies and similar storage</h2>
+  <p>
+    We use a session cookie to keep you logged in and a CSRF token for account
+    actions. The app may also use local storage for board settings and a
+    logged-out repertoire draft. Google Analytics and PostHog, when enabled, set
+    their own cookies or local storage as described in their documentation.
+  </p>
+
+  <h2>5. Where data is stored</h2>
+  <p>
+    Account data lives in a private server-side database (SQLite on the API host),
+    not in a public cloud storage bucket. Cached chess.com/Lichess month files are
+    stored on the server disk for performance and are not published as a public
+    website folder. Uploaded or imported PGN is stored as repertoire rows on your
+    account, not as world-readable files.
+  </p>
+
+  <h2>6. Retention and deletion</h2>
+  <p>
+    We keep account and repertoire data until you delete the account or we close
+    the service. Analyze caches of public games may outlive a single session
+    because they are shared lookups of public data, not your private uploads.
+  </p>
+  <p>
+    You can permanently delete your Opening Explorer account from
+    <strong>Profile → Delete account</strong>. That removes your user row,
+    repertoire (including imported PGN), learning cards, habits, shared reports,
+    sessions, and related jobs we store for you. It also signs you out. If you
+    had a Stripe subscription, we attempt to cancel it. Copies in backups,
+    server logs, or third-party systems (Google, Stripe, PostHog, Anthropic)
+    may persist for a limited time according to those systems.
+  </p>
+
+  <h2>7. Your choices</h2>
+  <ul>
+    <li>Use the site without an account to look up public usernames.</li>
+    <li>Skip AI coach if you do not want opening stats sent to Anthropic.</li>
+    <li>Edit linked chess usernames in Profile, or log out to end the session.</li>
+    <li>Delete your account as described above.</li>
+  </ul>
+
+  <h2>8. Children</h2>
+  <p>
+    Opening Explorer is not directed at children under 13, and we do not
+    knowingly collect personal information from them.
+  </p>
+
+  <h2>9. Changes</h2>
+  <p>
+    We may update this policy when the product changes. The “Last updated” date
+    at the top will change. Continued use after an update means you should review
+    the new text.
+  </p>
+
+  <h2>10. Contact</h2>
+  <p>
+    Use <strong>Profile → Delete account</strong> to erase stored account data.
+    For other privacy requests, contact us from the email address on your
+    Opening Explorer account (the operator of opening-explorer.com).
+  </p>
+</div>
+</body>
+</html>

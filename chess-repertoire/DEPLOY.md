@@ -189,6 +189,19 @@ No Render domain changes are required — only Netlify serves the public site; A
 - [ ] Deep review (annotate / scan) requires Pro when Stripe is configured
 - [ ] After redeploy, existing account still works (`users.db` on `/data` disk)
 - [ ] In-flight report jobs survive a brief restart (rows in `async_jobs`)
+- [ ] `/privacy` and `/terms` load (not the SPA shell) and mention Stockfish + Anthropic
+- [ ] Profile → Delete account erases the user (type `DELETE`)
+
+## Privacy / legal (required for a public site)
+
+The SPA footer, intro, and sign-in modal link to `/privacy.html` and `/terms.html`.
+Keep those files accurate when you add processors. After deploy:
+
+1. **Google Cloud → OAuth consent screen:** set Privacy Policy and Terms URLs to
+   `https://opening-explorer.com/privacy.html` and `.../terms.html`.
+2. **Stripe Dashboard → Customer portal / settings:** same URLs if Stripe asks.
+3. Game archives live in **server-side** `.chesscom-cache/` (not a public bucket).
+   Do not put `users.db` or cache files under `webapp/static/`.
 
 ## SQLite durability (single-node)
 

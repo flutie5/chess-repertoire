@@ -26,6 +26,9 @@ Billing (Stripe): POST /api/billing/checkout, /api/billing/portal,
 /api/billing/webhook. Pro (+ 3-day trial) gates My Repertoire sync,
 practice-move, and deep Stockfish review (annotate-*, scan-blunders*).
 Light /api/eval is free (rate-limited). Deep review and practice require Pro when Stripe is configured.
+DELETE /api/me erases the logged-in account (CSRF + {"confirm": "DELETE"}).
+
+Legal pages: GET /privacy and /terms (also .html).
 
 Analytics / admin (free, self-hosted): POST /api/analytics/hit,
 GET /api/analytics/summary (accounts + visits; ANALYTICS_ADMIN_EMAIL),
@@ -856,9 +859,31 @@ def _color_payload(report, games_with_moves, player_username: str = ""):
     }
 
 
+def _send_legal_page(filename: str):
+    """Serve privacy/terms from built static/ or Vite public/ (dev / tests)."""
+    static = Path(app.static_folder or WEBAPP_DIR / "static")
+    public = WEBAPP_DIR / "frontend" / "public"
+    for folder in (static, public):
+        if (folder / filename).is_file():
+            return send_from_directory(folder, filename)
+    return ("Not found", 404)
+
+
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/privacy")
+@app.get("/privacy.html")
+def privacy_page():
+    return _send_legal_page("privacy.html")
+
+
+@app.get("/terms")
+@app.get("/terms.html")
+def terms_page():
+    return _send_legal_page("terms.html")
 
 
 @app.get("/api/health")
@@ -2281,6 +2306,68 @@ def login():
 @app.post("/api/logout")
 def logout():
     session.pop("user_id", None)
+    return jsonify({"ok": True})
+
+
+def _cancel_stripe_on_delete(user: sqlite3.Row) -> None:
+    """Best-effort cancel so deleting the app account does not leave a paid sub."""
+    if not _stripe:
+        return
+    sub_id = _user_col(user, "stripe_subscription_id")
+    if not sub_id:
+        return
+    try:
+        _stripe.Subscription.cancel(sub_id)
+    except Exception as exc:
+        print(f"WARNING: stripe cancel on account delete failed: {exc}", flush=True)
+
+
+def _purge_user_data(user_id: int) -> None:
+    """Delete the user row and all account-scoped tables we store for them."""
+    tables = (
+        ("learning_cards", "user_id"),
+        ("user_habits", "user_id"),
+        ("user_repertoire", "user_id"),
+        ("auth_sessions", "user_id"),
+        ("shared_reports", "user_id"),
+        ("async_jobs", "user_id"),
+        ("analytics_searches", "user_id"),
+    )
+    with _db() as conn:
+        for table, col in tables:
+            try:
+                conn.execute(f"DELETE FROM {table} WHERE {col} = ?", (user_id,))
+            except sqlite3.Error as exc:
+                print(f"WARNING: purge {table} for user {user_id} failed: {exc}", flush=True)
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+@app.delete("/api/me")
+@limiter.limit("auth")
+def delete_account():
+    """Permanently erase the logged-in account and stored user data."""
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "not logged in"}), 401
+
+    expected = (session.get("csrf_token") or "").strip()
+    got = (request.headers.get("X-CSRF-Token") or "").strip()
+    if not expected or not got or not secrets.compare_digest(expected, got):
+        return jsonify({
+            "error": "CSRF token missing or invalid",
+            "code": "csrf_failed",
+        }), 403
+
+    data = _json_body()
+    if (data.get("confirm") or "").strip() != "DELETE":
+        return jsonify({
+            "error": 'Confirmation required. Send {"confirm": "DELETE"}.',
+        }), 400
+
+    uid = int(user["id"])
+    _cancel_stripe_on_delete(user)
+    _purge_user_data(uid)
+    session.clear()
     return jsonify({"ok": True})
 
 

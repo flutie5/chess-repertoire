@@ -47,10 +47,13 @@ a Vite-built SPA from `chess-repertoire/webapp/static/` (source under
   `.chesscom-cache/` (quotas: `CACHE_MAX_MB` / `CACHE_MAX_FILES`).
 - Optional integrations are OFF unless env vars are set (all optional for local
   dev): `GOOGLE_CLIENT_ID` (Google sign-in), `STRIPE_*` (Pro billing gates),
-  `ANTHROPIC_API_KEY` (AI repertoire recommendations in the CLI),
+  `ANTHROPIC_API_KEY` (AI coach in the app + CLI repertoire recommendations),
   `POSTHOG_PROJECT_API_KEY` (+ optional `POSTHOG_HOST`) for product analytics.
   With none set, the app runs fully; email/password registration still works,
-  and Pro gates are disabled.
+  and Pro gates are disabled. AI coach is unavailable until Anthropic is configured.
+- Privacy Policy and Terms live at `/privacy` and `/terms` (source:
+  `webapp/frontend/public/privacy.html`, `terms.html`). Account deletion is
+  `DELETE /api/me` with CSRF and `{"confirm": "DELETE"}` (Profile → Delete account).
 - Local state lives in `webapp/users.db` (SQLite + WAL) and `webapp/.secret_key`, both
   gitignored and created on first run. Backup: `scripts/backup_sqlite.sh` / `.ps1`.
 - Product usage (who signed up, funnels, retention, person emails) belongs in
