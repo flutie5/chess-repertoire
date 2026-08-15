@@ -647,9 +647,12 @@
     border: 1px solid var(--border-subtle);
   }
   #evalbar .white-fill {
-    position: absolute; left: 0; right: 0; bottom: 0;
+    position: absolute; left: 0; right: 0; bottom: 0; top: auto;
     background: #f0f0f0; height: 50%;
     transition: height .4s ease;
+  }
+  #evalbar.orient-black .white-fill {
+    top: 0; bottom: auto;
   }
   #evalbar .tick {
     position: absolute; left: 0; right: 0; top: 50%; height: 1px;

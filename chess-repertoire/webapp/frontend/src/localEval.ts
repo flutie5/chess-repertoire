@@ -1,5 +1,7 @@
 /** Browser Stockfish WASM fallback when the server engine is unavailable. */
 
+import { fenTurn, parseUciInfoLine, toWhitePov } from "./evalBar";
+
 export type LocalEvalResult = {
   cp?: number | null;
   mate?: number | null;
@@ -7,10 +9,12 @@ export type LocalEvalResult = {
   pv_san?: string;
   depth: number;
   source: "wasm";
+  pov: "white";
 };
 
 type Pending = {
   fen: string;
+  gen: number;
   resolve: (v: LocalEvalResult) => void;
   reject: (e: Error) => void;
   cp: number | null;
@@ -20,9 +24,18 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type Queued = {
+  fen: string;
+  resolve: (v: LocalEvalResult) => void;
+  reject: (e: Error) => void;
+};
+
 let worker: Worker | null = null;
 let readyPromise: Promise<Worker> | null = null;
 let pending: Pending | null = null;
+let queued: Queued | null = null;
+let stopping = false;
+let searchGen = 0;
 
 const WASM_DEPTH = 12;
 const WORKER_URLS = [
@@ -30,39 +43,89 @@ const WORKER_URLS = [
   "https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js",
 ];
 
-function onMessage(e: MessageEvent) {
-  if (!pending) return;
-  const line = String(e.data || "");
-  if (line.startsWith("info")) {
-    const depthM = /\bdepth (\d+)/.exec(line);
-    const mateM = /\bscore mate (-?\d+)/.exec(line);
-    const cpM = /\bscore cp (-?\d+)/.exec(line);
-    const pvM = /\bpv ([a-h][1-8][a-h][1-8][qrbn]?)/i.exec(line);
-    if (depthM) pending.depth = +depthM[1];
-    if (mateM) {
-      pending.mate = +mateM[1];
-      pending.cp = null;
-    } else if (cpM) {
-      pending.cp = +cpM[1];
-      pending.mate = null;
-    }
-    if (pvM) pending.bestUci = pvM[1];
-    return;
-  }
-  if (!line.startsWith("bestmove")) return;
+function rejectQueued(reason: string) {
+  if (!queued) return;
+  queued.reject(new Error(reason));
+  queued = null;
+}
+
+function finishPending(line: string) {
   const cur = pending;
   pending = null;
+  if (!cur) return;
   clearTimeout(cur.timer);
   const bestM = /^bestmove (\S+)/.exec(line);
   const bestUci = bestM?.[1] && bestM[1] !== "(none)" ? bestM[1] : cur.bestUci;
+  const white = toWhitePov({ cp: cur.cp, mate: cur.mate }, fenTurn(cur.fen));
   cur.resolve({
-    cp: cur.cp,
-    mate: cur.mate,
+    cp: white.cp,
+    mate: white.mate,
     best_san: bestUci,
     pv_san: bestUci || "",
     depth: cur.depth || WASM_DEPTH,
     source: "wasm",
+    pov: "white",
   });
+}
+
+function startGo(w: Worker, job: Queued) {
+  const myGen = ++searchGen;
+  const timer = setTimeout(() => {
+    if (pending?.gen !== myGen) return;
+    pending = null;
+    stopping = true;
+    try {
+      w.postMessage("stop");
+    } catch {
+      stopping = false;
+    }
+    job.reject(new Error("Stockfish WASM eval timed out"));
+  }, 20000);
+  pending = {
+    fen: job.fen,
+    gen: myGen,
+    resolve: job.resolve,
+    reject: job.reject,
+    cp: null,
+    mate: null,
+    bestUci: null,
+    depth: 0,
+    timer,
+  };
+  w.postMessage(`position fen ${job.fen}`);
+  w.postMessage(`go depth ${WASM_DEPTH}`);
+}
+
+function onMessage(e: MessageEvent) {
+  const line = String(e.data || "");
+
+  if (line.startsWith("bestmove")) {
+    if (stopping) {
+      stopping = false;
+      const next = queued;
+      queued = null;
+      if (next && worker) startGo(worker, next);
+      return;
+    }
+    finishPending(line);
+    const next = queued;
+    queued = null;
+    if (next && worker) startGo(worker, next);
+    return;
+  }
+
+  if (!pending || stopping) return;
+  const parsed = parseUciInfoLine(line);
+  if (!parsed) return;
+  if (parsed.depth != null) pending.depth = parsed.depth;
+  if (parsed.mate != null) {
+    pending.mate = parsed.mate;
+    pending.cp = null;
+  } else if (parsed.cp != null) {
+    pending.cp = parsed.cp;
+    pending.mate = null;
+  }
+  if (parsed.pvUci) pending.bestUci = parsed.pvUci;
 }
 
 async function workerUrlFor(url: string): Promise<string> {
@@ -131,30 +194,20 @@ async function ensureWorker(): Promise<Worker> {
 
 export async function evalFenLocal(fen: string): Promise<LocalEvalResult> {
   const w = await ensureWorker();
-  if (pending) {
-    clearTimeout(pending.timer);
-    pending.reject(new Error("superseded"));
-    pending = null;
-  }
   return new Promise<LocalEvalResult>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (pending) {
+    const job: Queued = { fen, resolve, reject };
+    if (pending || stopping) {
+      rejectQueued("superseded");
+      queued = job;
+      if (pending && !stopping) {
+        stopping = true;
+        clearTimeout(pending.timer);
+        pending.reject(new Error("superseded"));
         pending = null;
-        reject(new Error("Stockfish WASM eval timed out"));
+        w.postMessage("stop");
       }
-    }, 20000);
-    pending = {
-      fen,
-      resolve,
-      reject,
-      cp: 0,
-      mate: null,
-      bestUci: null,
-      depth: 0,
-      timer,
-    };
-    w.postMessage("stop");
-    w.postMessage(`position fen ${fen}`);
-    w.postMessage(`go depth ${WASM_DEPTH}`);
+      return;
+    }
+    startGo(w, job);
   });
 }
