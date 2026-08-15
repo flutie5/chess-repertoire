@@ -3090,14 +3090,24 @@ let googleWarmupPromise = null;
 let siteConfigPromise = null;   // shared cache for GET /api/auth/config (GA)
 let csrfToken = "";
 
+function applyAuthConfig(cfg) {
+  if (cfg?.csrf_token) csrfToken = cfg.csrf_token;
+  if (cfg?.google_client_id) googleClientId = cfg.google_client_id;
+  if (cfg?.nonce) googleNonce = cfg.nonce;
+}
+
 function fetchSiteConfig() {
   if (!siteConfigPromise) {
     siteConfigPromise = api("/api/auth/config", "GET")
       .then((cfg) => {
-        if (cfg?.csrf_token) csrfToken = cfg.csrf_token;
+        applyAuthConfig(cfg);
         return cfg || {};
       })
-      .catch(() => ({}));
+      .catch((e) => {
+        // Don't cache a cold-start 504 forever — Google sign-in must retry.
+        siteConfigPromise = null;
+        throw e;
+      });
   }
   return siteConfigPromise;
 }
@@ -3550,6 +3560,7 @@ async function logout() {
   googleIdentityReady = false;
   googleNonce = "";
   googleWarmupPromise = null;
+  siteConfigPromise = null;
   warmGoogleSignIn();
 }
 
@@ -3590,7 +3601,7 @@ async function handleGoogleCredential(response) {
       : (e.message || "Google sign-in failed.");
     setMsg(authGoogleMsg, msg, "error");
     // Mint a fresh nonce so the next Google click is not stuck on a used one.
-    try { await refreshGoogleAuthConfig(); } catch (_) { /* ignore */ }
+    try { await refreshGoogleAuthConfigResilient(); } catch (_) { /* ignore */ }
     googleIdentityReady = false;
     try { await prepareGoogleSignIn(); } catch (_) { /* ignore */ }
   } finally {
@@ -3599,20 +3610,59 @@ async function handleGoogleCredential(response) {
   }
 }
 
+function isTransientAuthFailure(e) {
+  const status = e?.httpStatus || e?.status;
+  const msg = String(e?.message || "").toLowerCase();
+  return status === 502 || status === 503 || status === 504
+    || e?.isProxyMiss
+    || e?.name === "AbortError"
+    || msg.includes("timed out")
+    || msg.includes("waking up");
+}
+
+async function pingRenderWakeup() {
+  if (!RENDER_API) return;
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 45000) : null;
+  try {
+    await fetch(`${RENDER_API}/api/health`, {
+      mode: "cors",
+      credentials: "omit",
+      signal: ctrl ? ctrl.signal : undefined,
+    });
+  } catch (_) {
+    /* wake-up ping; ignore failures */
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function refreshGoogleAuthConfig() {
   const cfg = await api("/api/auth/config", "GET");
+  applyAuthConfig(cfg);
   googleClientId = cfg.google_client_id || "";
   googleNonce = cfg.nonce || "";
   return googleClientId;
 }
 
+async function refreshGoogleAuthConfigResilient() {
+  try {
+    return await refreshGoogleAuthConfig();
+  } catch (e) {
+    if (!isTransientAuthFailure(e)) throw e;
+    await pingRenderWakeup();
+    await sleep(1500);
+    return await refreshGoogleAuthConfig();
+  }
+}
+
 async function ensureGoogleClientId() {
   if (googleClientId && googleNonce) return googleClientId;
   try {
-    await refreshGoogleAuthConfig();
+    await fetchSiteConfig();
   } catch (e) {
     googleClientId = googleClientId || "";
-    googleNonce = "";
+    googleNonce = googleNonce || "";
   }
   return googleClientId;
 }
@@ -3642,8 +3692,9 @@ function initGoogleIdentity() {
     auto_select: false,
     cancel_on_tap_outside: true,
     context: "signin",
-    // Chrome third-party cookie changes: FedCM avoids the stuck gsi/select tab.
-    use_fedcm_for_prompt: true,
+    // Keep the GIS button on the iframe/popup path so the nonce claim is
+    // included. use_fedcm_for_prompt is deprecated and ignored by GIS.
+    use_fedcm_for_button: false,
     itp_support: true,
   });
   googleIdentityReady = true;
@@ -3657,17 +3708,30 @@ function renderGoogleButton() {
   if (!googleIdentityReady || !googleNonce) {
     if (!initGoogleIdentity()) return false;
   }
-  host.innerHTML = "";
-  const width = Math.max(280, Math.min(400, Math.floor((wrap?.clientWidth || host.parentElement?.clientWidth || 320))));
-  window.google.accounts.id.renderButton(host, {
-    theme: "outline",
-    size: "large",
-    text: "continue_with",
-    shape: "rectangular",
-    width,
-    logo_alignment: "left",
-  });
+  // GIS measures the host while rendering. It must be visible — the default
+  // CSS hides #google-signin-btn until .has-gis, which produced a dead button.
   if (wrap) wrap.classList.add("has-gis");
+  host.innerHTML = "";
+  const paint = () => {
+    if (!host.isConnected || !window.google?.accounts?.id) return;
+    const width = Math.max(
+      280,
+      Math.min(400, Math.floor((wrap?.clientWidth || host.parentElement?.clientWidth || 320))),
+    );
+    window.google.accounts.id.renderButton(host, {
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+      width,
+      logo_alignment: "left",
+    });
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(paint);
+  } else {
+    paint();
+  }
   return true;
 }
 
@@ -3678,7 +3742,7 @@ async function prepareGoogleSignIn() {
   // Always refresh nonce before initialize — GIS binds it into the ID token.
   let clientId = "";
   try {
-    clientId = await refreshGoogleAuthConfig();
+    clientId = await refreshGoogleAuthConfigResilient();
   } catch (e) {
     clientId = await ensureGoogleClientId();
   }

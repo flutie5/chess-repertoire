@@ -36,11 +36,11 @@ Ensure `chess-repertoire/` is in a remote Git repository Render and Netlify can 
 |---|---|
 | Runtime | Python 3 |
 | Build command | `pip install -r requirements.txt && bash scripts/download_stockfish.sh` |
-| Start command | `gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` |
+| Start command | `gunicorn webapp.wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120` |
 | Health check | `/api/health` (503 if Stockfish cannot start in production) |
 | Root directory | `chess-repertoire` |
 
-**Keep `--workers 1`.** Report/scan jobs are durable in SQLite (`async_jobs`), but the Stockfish engine pool is in-process. Multiple Gunicorn workers would multiply engine processes and fragment rate-limit state. Raise workers only after engines move off the web process.
+**Keep `--workers 1`.** Report/scan jobs are durable in SQLite (`async_jobs`), but the Stockfish engine pool is in-process. Multiple Gunicorn workers would multiply engine processes and fragment rate-limit state. `--threads 4` lets Sign in with Google and `/api/health` proceed while an eval is running on another thread. Raise workers only after engines move off the web process.
 
 **Plan:** Free tier sleeps and is fine for demos. For real traffic, upgrade to a paid always-on Render plan before any growth campaign.
 

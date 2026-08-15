@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -192,6 +193,39 @@ def test_google_rejects_missing_email(client):
     resp = _google_login(client, token_overrides={"email": ""})
     assert resp.status_code == 400
     assert _row_by_email("player@example.com") is None
+
+
+def test_auth_config_reuses_unused_nonce(client):
+    first = client.get("/api/auth/config").get_json()["nonce"]
+    second = client.get("/api/auth/config").get_json()["nonce"]
+    assert first and first == second
+
+
+def test_auth_config_rotates_nonce_after_login(client):
+    before = client.get("/api/auth/config").get_json()["nonce"]
+    resp = _google_login(client)
+    assert resp.status_code == 200
+    after = client.get("/api/auth/config").get_json()["nonce"]
+    assert after and after != before
+
+
+def test_google_accepts_sha256_hex_nonce(client):
+    cfg = client.get("/api/auth/config")
+    nonce = cfg.get_json()["nonce"]
+    hashed = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+    info = _token_info(nonce=hashed)
+    with patch("google.oauth2.id_token.verify_oauth2_token", return_value=info):
+        resp = client.post("/api/auth/google", json={"credential": "fake.jwt"})
+    assert resp.status_code == 200, resp.get_json()
+
+
+def test_google_accepts_missing_fedcm_nonce(client):
+    info = _token_info(nonce="")
+    cfg = client.get("/api/auth/config")
+    assert cfg.get_json()["nonce"]
+    with patch("google.oauth2.id_token.verify_oauth2_token", return_value=info):
+        resp = client.post("/api/auth/google", json={"credential": "fake.jwt"})
+    assert resp.status_code == 200, resp.get_json()
 
 
 def test_google_rejects_nonce_mismatch(client):

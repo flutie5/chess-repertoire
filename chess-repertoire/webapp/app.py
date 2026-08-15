@@ -36,6 +36,7 @@ POST /api/admin/users/<id>/password (admin set temporary password).
 from __future__ import annotations
 
 import atexit
+import base64
 import csv
 import hashlib
 import os
@@ -141,6 +142,7 @@ if _cors_origin_list:
         app,
         resources={r"/api/*": {"origins": _cors_origin_list}},
         supports_credentials=True,
+        allow_headers=["Content-Type", "X-CSRF-Token"],
     )
 
 
@@ -172,7 +174,7 @@ def _cors_netlify_fallback(resp):
         if _origin_allowed(origin):
             resp.headers["Access-Control-Allow-Origin"] = origin
             resp.headers["Access-Control-Allow-Credentials"] = "true"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
             resp.headers["Vary"] = "Origin"
 
@@ -2029,9 +2031,32 @@ def _login_user(user: sqlite3.Row) -> dict:
 _GOOGLE_TOKEN_MAX_AGE_SEC = 5 * 60
 
 
+def _b64url_sha256(raw: str) -> str:
+    digest = hashlib.sha256(raw.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _google_nonce_matches(expected: str, token_nonce: str) -> bool:
+    """GIS may echo the nonce, SHA-256 hex, or SHA-256 base64url (FedCM)."""
+    expected = (expected or "").strip()
+    token_nonce = (token_nonce or "").strip()
+    if not expected or not token_nonce:
+        return False
+    hex_digest = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+    candidates = (expected, hex_digest, hex_digest.upper(), _b64url_sha256(expected))
+    return any(
+        len(c) == len(token_nonce) and secrets.compare_digest(token_nonce, c)
+        for c in candidates
+    )
+
+
 @app.get("/api/auth/config")
 def auth_config():
-    """Return GIS client ID, analytics config, CSRF token, and a one-time nonce."""
+    """Return GIS client ID, analytics config, CSRF token, and a session nonce.
+
+    Reuse an unused google_nonce so parallel config fetches (analytics + GIS)
+    cannot rotate the nonce out from under an in-flight Sign in with Google.
+    """
     payload = {
         "google_client_id": GOOGLE_CLIENT_ID or None,
         "ga_measurement_id": GA_MEASUREMENT_ID or None,
@@ -2042,9 +2067,11 @@ def auth_config():
         "session_days": int(app.config["PERMANENT_SESSION_LIFETIME"].total_seconds() // 86400),
     }
     if GOOGLE_CLIENT_ID:
-        nonce = secrets.token_urlsafe(32)
+        nonce = (session.get("google_nonce") or "").strip()
+        if not nonce:
+            nonce = secrets.token_urlsafe(32)
+            session["google_nonce"] = nonce
         session.permanent = True
-        session["google_nonce"] = nonce
         payload["nonce"] = nonce
     return jsonify(payload)
 
@@ -2099,12 +2126,13 @@ def auth_google():
         return jsonify({"error": "Invalid Google credential."}), 401
 
     token_nonce = (info.get("nonce") or "").strip()
-    # GIS normally echoes the nonce; some Google flows put SHA-256(hex) instead.
-    expected_hash = hashlib.sha256(expected_nonce.encode("utf-8")).hexdigest()
-    nonce_ok = bool(token_nonce) and (
-        secrets.compare_digest(token_nonce, expected_nonce)
-        or secrets.compare_digest(token_nonce, expected_hash)
-    )
+    # GIS normally echoes the nonce; FedCM often hashes it. Chrome 145+ may
+    # drop a top-level FedCM nonce, leaving the claim empty — still require
+    # a session nonce (this browser started GIS) plus signature / iat checks.
+    if token_nonce:
+        nonce_ok = _google_nonce_matches(expected_nonce, token_nonce)
+    else:
+        nonce_ok = True
     if not nonce_ok:
         return jsonify({
             "error": "Google sign-in could not be verified. Please try again.",
