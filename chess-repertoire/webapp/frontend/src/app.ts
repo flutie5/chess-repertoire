@@ -4,6 +4,13 @@ import { Chess } from "@vendor/chess.js";
 import { state, START_FEN } from "./state";
 import { evalFenLocal } from "./localEval";
 import {
+  displayScore,
+  evalBarFill,
+  evalFavorsWhite,
+  formatEvalText,
+  whiteShareFromEval,
+} from "./evalBar";
+import {
   initProductAnalytics,
   identifyProductUser,
   resetProductAnalytics,
@@ -15,6 +22,7 @@ import {
 let game = new Chess();     // full played game (may extend past state.ply)
 let gameRootFen = START_FEN; // FEN before any moves in `game`
 let freeFen = null;          // raw FEN when Chess.js rejects (e.g. missing king)
+let lastWhiteShare = 0.5;
 
 function tryLoadChess(fen) {
   try { return new Chess(fen); } catch (e) { return null; }
@@ -565,6 +573,7 @@ function refreshBoard() {
   }
   clearSelection({ keepPremove: true, keepShapes: true });
   renderBoard(currentFen(), state.orientation, hl, hlSeverity);
+  applyEvalFill(lastWhiteShare);
   applyCheckHighlight();
   applyPremoveHighlight();
   markMovablePieces();
@@ -695,7 +704,7 @@ function scheduleEval() {
     labelEl.textContent = "Stockfish — place both kings to evaluate";
     pvEl.innerHTML = "";
     clearBestArrow();
-    if (evalFill) evalFill.style.height = "50%";
+    applyEvalFill(0.5);
     return;
   }
   if (evalCache.has(fen)) { renderEval(evalCache.get(fen)); return; }
@@ -801,6 +810,7 @@ async function fetchEvalLocal(fen, token) {
     pv_san: bestSan || "",
     depth: raw.depth,
     source: "wasm",
+    pov: raw.pov,
   };
   engineAvailable = true;
   evalCache.set(fen, data);
@@ -808,29 +818,30 @@ async function fetchEvalLocal(fen, token) {
   labelEl.textContent = `Stockfish (browser) \u2014 depth ${data.depth}`;
 }
 
+function boardOrientation() {
+  return state.orientation === "black" ? "black" : "white";
+}
+
+function applyEvalFill(whiteShare) {
+  lastWhiteShare = whiteShare;
+  const bar = document.getElementById("evalbar");
+  if (bar) bar.classList.toggle("orient-black", boardOrientation() === "black");
+  if (!evalFill) return;
+  const { heightPct, anchor } = evalBarFill(whiteShare, boardOrientation());
+  evalFill.style.top = anchor === "top" ? "0" : "auto";
+  evalFill.style.bottom = anchor === "bottom" ? "0" : "auto";
+  evalFill.style.height = heightPct;
+}
+
 function renderEval(data) {
   enginePanel.classList.add("visible");
-  let text, whiteShare;
-  if (data.mate != null) {
-    text = (data.mate > 0 ? "M" : "-M") + Math.abs(data.mate);
-    whiteShare = data.mate > 0 ? 1 : 0;
-  } else if (typeof data.cp === "number") {
-    const p = data.cp / 100;
-    text = (p > 0 ? "+" : "") + p.toFixed(1);
-    whiteShare = 1 / (1 + Math.exp(-p / 1.5));   // squash to 0..1
-  } else {
-    text = "—";
-    whiteShare = 0.5;
-  }
+  const score = displayScore(data, currentFen());
+  const text = formatEvalText(score);
+  const whiteShare = whiteShareFromEval(score);
   scoreEl.textContent = text;
-  scoreEl.className = (data.mate != null ? data.mate > 0 : (data.cp ?? 0) >= 0)
-    ? "white-adv" : "black-adv";
+  scoreEl.className = evalFavorsWhite(score) ? "white-adv" : "black-adv";
   labelEl.textContent = `Stockfish \u2014 depth ${data.depth}`;
-  if (evalFill) {
-    evalFill.style.bottom = "0";
-    evalFill.style.top = "auto";
-    evalFill.style.height = (whiteShare * 100).toFixed(1) + "%";
-  }
+  applyEvalFill(whiteShare);
   pvEl.innerHTML = data.best_san
     ? `Best: <b>${data.best_san}</b> &nbsp; ${data.pv_san}`
     : "";

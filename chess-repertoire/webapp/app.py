@@ -1021,6 +1021,7 @@ def evaluate():
             "best_san": best_san,
             "pv_san": pv_san,
             "turn": "white" if board.turn == chess.WHITE else "black",
+            "pov": "white",
         }
         _eval_cache[key] = result
         return jsonify(result)
