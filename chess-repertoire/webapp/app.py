@@ -683,6 +683,11 @@ def _engine_analyse(engine, board, *, depth: int | None = None, time_sec: float 
 
     If Stockfish stops responding, the hard timeout fires, the engine is
     treated as broken by the caller, and the worker stays responsive.
+
+    Critical: do NOT use ``with ThreadPoolExecutor(...)`` here. On timeout its
+    ``__exit__`` calls ``shutdown(wait=True)``, which blocks forever on the
+    still-running analyse thread and prevents ``release(broken=True)`` from
+    hard-killing Stockfish — wedging the only Gunicorn worker.
     """
     import concurrent.futures
 
@@ -698,15 +703,18 @@ def _engine_analyse(engine, board, *, depth: int | None = None, time_sec: float 
             return engine.analyse(board, limit, multipv=multipv)
         return engine.analyse(board, limit)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         fut = pool.submit(_run)
         try:
             return fut.result(timeout=timeout)
         except concurrent.futures.TimeoutError as exc:
-            # Signal acquire() to recycle this engine process.
+            # Abandon the hung thread; acquire()'s broken path will kill Stockfish.
             raise chess.engine.EngineError(
                 f"Stockfish analyse timed out after {timeout:.1f}s"
             ) from exc
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 # Warm up in production so Render health checks catch a dead binary before
@@ -2134,7 +2142,9 @@ def auth_google():
             )
 
         # Bound Google JWKS/network so a hung cert fetch cannot wedge the worker.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        # Do not use ``with ThreadPoolExecutor`` — on timeout __exit__ waits forever.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
             fut = pool.submit(_verify)
             try:
                 info = fut.result(timeout=12)
@@ -2144,6 +2154,8 @@ def auth_google():
                     "error": "Google verification timed out. Please try again.",
                     "code": "google_verify_timeout",
                 }), 504
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
     except Exception as exc:
         print(f"WARNING: Google token verify failed: {exc}", flush=True)
         return jsonify({"error": "Invalid Google credential."}), 401
